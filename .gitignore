@@ -24,7 +24,9 @@ project.assets.json
 *.db-wal
 *.sqlite
 *.sqlite3
-/data/
+# NOTE: do NOT add "/data/" here. macOS is case-insensitive (git sets core.ignorecase=true),
+# so "/data/" ALSO matches the source folder "Data/" and silently un-tracks the EF classes.
+# The *.db* rules above already cover the runtime SQLite files (e.g. /data/v2en.db).
 
 # ---- Secrets / local env ----
 # User-secrets live outside the repo (~/.microsoft/usersecrets), so nothing to ignore here,
