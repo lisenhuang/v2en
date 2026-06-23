@@ -1,0 +1,15 @@
+@page
+@model ErrorModel
+@{
+    ViewData["Title"] = "Error";
+}
+
+<section class="empty-state">
+    <h1>Something went wrong</h1>
+    <p>An error occurred while processing your request.</p>
+    @if (Model.ShowRequestId)
+    {
+        <p><small>Request ID: <code>@Model.RequestId</code></small></p>
+    }
+    <p><a class="pager-btn" href="/">← Back home</a></p>
+</section>

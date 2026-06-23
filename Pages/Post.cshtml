@@ -1,0 +1,27 @@
+@page "/t/{id:long}"
+@model PostModel
+@{
+    ViewData["Title"] = Model.Post.TitleEn ?? Model.Post.TitleZh;
+    ViewData["Description"] = HtmlText.Preview(Model.Post.ContentEnHtml, 160);
+    ViewData["Canonical"] = Model.Post.SourceUrl;
+}
+
+<article class="post">
+    <a class="back-link" href="/">← Home</a>
+
+    <h1 class="post-detail-title">@(Model.Post.TitleEn ?? Model.Post.TitleZh)</h1>
+
+    <div class="post-meta">
+        <span class="author">@Model.Post.AuthorName</span>
+        <span class="dot">·</span>
+        <time datetime="@Model.Post.Published.ToString("o")">@Model.Post.Published.UtcDateTime.ToString("yyyy-MM-dd HH:mm")Z</time>
+    </div>
+
+    <div class="post-content">
+        @Html.Raw(Model.Post.ContentEnHtml)
+    </div>
+
+    <div class="post-footer">
+        <a class="source-link" href="@Model.Post.SourceUrl" rel="nofollow noopener" target="_blank">View original on V2EX →</a>
+    </div>
+</article>

@@ -1,0 +1,73 @@
+@page
+@model IndexModel
+@{
+    ViewData["Title"] = null; // home
+}
+
+@if (Model.TranslatedCount == 0)
+{
+    <section class="empty-state">
+        <h1>Translations in progress…</h1>
+        <p>
+            We're fetching the V2EX front page and translating posts to English.
+            @if (Model.PendingCount > 0)
+            {
+                <text>@Model.PendingCount post(s) queued.</text>
+            }
+            Check back in a few minutes.
+        </p>
+    </section>
+}
+else
+{
+    <div class="status-bar">
+        <span><strong>@Model.TranslatedCount</strong> translated</span>
+        @if (Model.PendingCount > 0)
+        {
+            <span class="dot">·</span>
+            <span>@Model.PendingCount pending</span>
+        }
+        @if (Model.LastFetchUtc is { } fetched)
+        {
+            <span class="dot">·</span>
+            <span>updated <time datetime="@fetched.ToString("o")">@fetched.UtcDateTime.ToString("yyyy-MM-dd HH:mm")Z</time></span>
+        }
+    </div>
+
+    <ul class="post-list">
+        @foreach (var p in Model.Posts)
+        {
+            <li class="post-card">
+                <a class="post-card-link" href="/t/@p.V2exId">
+                    <h2 class="post-title">@(p.TitleEn ?? p.TitleZh)</h2>
+                    <p class="post-preview">@HtmlText.Preview(p.ContentEnHtml)</p>
+                </a>
+                <div class="post-meta">
+                    <span class="author">@p.AuthorName</span>
+                    <span class="dot">·</span>
+                    <time datetime="@p.Published.ToString("o")">@p.Published.UtcDateTime.ToString("yyyy-MM-dd HH:mm")Z</time>
+                </div>
+            </li>
+        }
+    </ul>
+
+    <nav class="pager">
+        @if (Model.CurrentPage > 1)
+        {
+            <a class="pager-btn" href="/?page=@(Model.CurrentPage - 1)">← Newer</a>
+        }
+        else
+        {
+            <span class="pager-btn disabled">← Newer</span>
+        }
+        <span class="pager-page">Page @Model.CurrentPage</span>
+        @if (Model.HasNext)
+        {
+            <a class="pager-btn" href="/?page=@(Model.CurrentPage + 1)">Older →</a>
+        }
+        else
+        {
+            <span class="pager-btn disabled">Older →</span>
+        }
+    </nav>
+}

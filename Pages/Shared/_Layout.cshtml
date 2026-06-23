@@ -1,0 +1,58 @@
+@{
+    var canonical = ViewData["Canonical"] as string;
+}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>@(ViewData["Title"] is null ? "V2EX · English" : ViewData["Title"] + " · V2EX English")</title>
+    <meta name="description" content="@(ViewData["Description"] ?? "V2EX front-page posts, translated to English.")" />
+    @if (!string.IsNullOrEmpty(canonical))
+    {
+        <link rel="canonical" href="@canonical" />
+    }
+    <link rel="icon" href="~/favicon.ico" />
+    <link rel="alternate" type="application/atom+xml" title="V2EX English" href="/index.xml" />
+    @* Set theme before paint to avoid a flash of the wrong theme. *@
+    <script>
+        (function () {
+            try { var t = localStorage.getItem('theme'); if (t) document.documentElement.setAttribute('data-theme', t); } catch (e) { }
+        })();
+    </script>
+    <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
+</head>
+<body>
+    <header class="site-header">
+        <div class="container header-inner">
+            <a class="brand" href="/">
+                <span class="brand-mark">V2</span>
+                <span class="brand-text">V2EX <em>English</em></span>
+            </a>
+            <nav class="header-nav">
+                <a href="/index.xml" class="nav-link" title="English Atom feed">RSS</a>
+                <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle dark mode" title="Toggle theme">
+                    <span class="theme-icon" aria-hidden="true"></span>
+                </button>
+            </nav>
+        </div>
+    </header>
+
+    <main class="container">
+        @RenderBody()
+    </main>
+
+    <footer class="site-footer">
+        <div class="container">
+            <p>
+                Translated mirror of <a href="https://www.v2ex.com/" rel="nofollow noopener" target="_blank">V2EX</a>,
+                not affiliated with V2EX. Content © V2EX and respective authors; machine-translated to English.
+            </p>
+            <p><a href="/index.xml">English Atom feed</a> · <a href="/healthz">status</a></p>
+        </div>
+    </footer>
+
+    <script src="~/js/site.js" asp-append-version="true"></script>
+    @await RenderSectionAsync("Scripts", required: false)
+</body>
+</html>

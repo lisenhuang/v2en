@@ -1,0 +1,14 @@
+services:
+  v2en:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - v2en-data:/data
+    environment:
+      - OpenRouter__ApiKey=${OPENROUTER_API_KEY:?OpenRouter API key is required}
+      - Site__BaseUrl=${SITE_BASE_URL:-http://localhost:8080}
+
+volumes:
+  v2en-data:
