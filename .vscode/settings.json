@@ -1,0 +1,9 @@
+{
+  // Custom instructions for the IDE's built-in "Generate Commit Message"
+  // feature (the sparkle button in the Source Control panel).
+  "github.copilot.chat.commitMessageGeneration.instructions": [
+    {
+      "text": "Write a detailed Conventional Commit message. The subject line must use a type prefix (feat, fix, docs, style, refactor, perf, test, build, ci, chore) plus an optional scope, be in the imperative mood, and stay under 72 characters. After a blank line, add a body that explains WHAT changed and WHY (the motivation and context), not just how. Use bullet points to list the individual notable changes when there is more than one. Reference any relevant issue or ticket numbers if present. Do not be terse — be specific about the impact of the change."
+    }
+  ]
+}
