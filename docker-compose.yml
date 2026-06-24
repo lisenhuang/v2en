@@ -9,9 +9,12 @@ services:
     environment:
       - OpenRouter__ApiKey=${OPENROUTER_API_KEY:?OpenRouter API key is required}
       - Site__BaseUrl=${SITE_BASE_URL:-http://localhost:8236}
-      # Optional admin login seed (else a random password is generated and logged once):
-      # - Admin__Username=admin
-      # - Admin__Password=change-me
+      # Admin dashboard login. While these are set, the account is enforced on every
+      # startup (created/reset to match) so this login always works. ⚠ CHANGE the
+      # password — anyone reading this file can see it. Clear it to manage the password
+      # only via the dashboard instead.
+      - Admin__Username=${ADMIN_USERNAME:-admin}
+      - Admin__Password=${ADMIN_PASSWORD:-v2en-admin-2026}
 
 volumes:
   v2en-data:

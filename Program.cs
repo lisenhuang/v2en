@@ -141,38 +141,57 @@ using (var scope = app.Services.CreateScope())
     // Seed the runtime-settings row from appsettings on first run (DB is source of truth after).
     await scope.ServiceProvider.GetRequiredService<RuntimeSettingsService>().GetAsync();
 
-    // Seed an initial admin account if none exists. Username/password come from config
-    // (Admin:Username / Admin:Password, or env Admin__Username / Admin__Password); if no
-    // password is configured we generate a random one and log it once so you can log in.
+    // ── Seed / enforce the admin account ─────────────────────────────────────────
+    // Contract:
+    //  • If Admin:Password is configured, that account is ENFORCED on every startup
+    //    (created if missing, password re-synced if changed) so a known login always
+    //    works. Leave it empty to manage the password only via the dashboard.
+    //  • If Admin:Password is empty and no admin exists yet, one is seeded with a
+    //    random password that is logged once.
     var startupLog = scope.ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger("Startup");
-    if (!await db.AdminUsers.AnyAsync())
-    {
-        var username = builder.Configuration["Admin:Username"];
-        if (string.IsNullOrWhiteSpace(username)) username = "admin";
-        var password = builder.Configuration["Admin:Password"];
-        var generated = string.IsNullOrWhiteSpace(password);
-        if (generated)
-            password = Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(12));
+    var adminUser = builder.Configuration["Admin:Username"];
+    if (string.IsNullOrWhiteSpace(adminUser)) adminUser = "admin";
+    var adminPass = builder.Configuration["Admin:Password"];
 
+    if (!string.IsNullOrWhiteSpace(adminPass))
+    {
+        var user = await db.AdminUsers.FirstOrDefaultAsync(u => u.Username == adminUser);
+        if (user is null)
+        {
+            db.AdminUsers.Add(new AdminUser
+            {
+                Username = adminUser,
+                PasswordHash = PasswordHasher.Hash(adminPass),
+                CreatedUtc = DateTimeOffset.UtcNow,
+            });
+            await db.SaveChangesAsync();
+            startupLog.LogInformation("Seeded admin account '{User}' from configuration.", adminUser);
+        }
+        else if (!PasswordHasher.Verify(adminPass, user.PasswordHash))
+        {
+            user.PasswordHash = PasswordHasher.Hash(adminPass);
+            await db.SaveChangesAsync();
+            startupLog.LogInformation("Admin '{User}' password re-synced from configuration.", adminUser);
+        }
+    }
+    else if (!await db.AdminUsers.AnyAsync())
+    {
+        var password = Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(12));
         db.AdminUsers.Add(new AdminUser
         {
-            Username = username,
-            PasswordHash = PasswordHasher.Hash(password!),
+            Username = adminUser,
+            PasswordHash = PasswordHasher.Hash(password),
             CreatedUtc = DateTimeOffset.UtcNow,
         });
         await db.SaveChangesAsync();
-
-        if (generated)
-            startupLog.LogWarning(
-                "\n  ┌──────────────────────────────────────────────────────────────┐\n" +
-                "  │  Seeded admin account — CHANGE THE PASSWORD after first login │\n" +
-                "  │    username: {User}\n" +
-                "  │    password: {Password}\n" +
-                "  │  Set Admin__Username / Admin__Password env vars to control it │\n" +
-                "  └──────────────────────────────────────────────────────────────┘",
-                username, password);
-        else
-            startupLog.LogInformation("Seeded admin account '{User}' from configuration.", username);
+        startupLog.LogWarning(
+            "\n  ┌──────────────────────────────────────────────────────────────┐\n" +
+            "  │  Seeded admin account — CHANGE THE PASSWORD after first login │\n" +
+            "  │    username: {User}\n" +
+            "  │    password: {Password}\n" +
+            "  │  Set Admin__Username / Admin__Password env vars to control it │\n" +
+            "  └──────────────────────────────────────────────────────────────┘",
+            adminUser, password);
     }
 }
 
