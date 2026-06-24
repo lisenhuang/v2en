@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using Microsoft.EntityFrameworkCore;
 using v2en.Data;
+using v2en.Utilities;
 
 namespace v2en.Services;
 
@@ -20,6 +21,8 @@ public class TranslationService
     private readonly OpenRouterTranslator _translator;
     private readonly HtmlSanitizerService _sanitizer;
     private readonly RuntimeSettingsService _settings;
+    private readonly GeminiEmbeddingService _embedder;
+    private readonly VectorCache _vectorCache;
     private readonly ILogger<TranslationService> _logger;
 
     public TranslationService(
@@ -28,6 +31,8 @@ public class TranslationService
         OpenRouterTranslator translator,
         HtmlSanitizerService sanitizer,
         RuntimeSettingsService settings,
+        GeminiEmbeddingService embedder,
+        VectorCache vectorCache,
         ILogger<TranslationService> logger)
     {
         _db = db;
@@ -35,6 +40,8 @@ public class TranslationService
         _translator = translator;
         _sanitizer = sanitizer;
         _settings = settings;
+        _embedder = embedder;
+        _vectorCache = vectorCache;
         _logger = logger;
     }
 
@@ -60,6 +67,7 @@ public class TranslationService
 
         await _db.SaveChangesAsync(ct);
         await TranslatePendingAsync(state, ct);
+        await EmbedPendingAsync(ct);
     }
 
     private async Task UpsertAsync(ParsedFeed feed, CancellationToken ct)
@@ -137,6 +145,14 @@ public class TranslationService
             state.QuotaWindowResetUtc = new DateTimeOffset(now.UtcDateTime.Date.AddDays(1), TimeSpan.Zero);
         }
 
+        if (string.IsNullOrWhiteSpace(cfg.OpenRouterApiKey))
+        {
+            _logger.LogWarning("No OpenRouter API key set; translation paused.");
+            Log(LogSeverity.Warning, "translate_skipped", "Translation is paused — set your OpenRouter API key in the dashboard.");
+            await _db.SaveChangesAsync(ct);
+            return;
+        }
+
         if (models.Count == 0)
         {
             _logger.LogWarning("No translation models configured; skipping translation.");
@@ -181,7 +197,7 @@ public class TranslationService
 
             var post = pending[i];
             var outcome = await _translator.TranslateAsync(
-                post.TitleZh, post.ContentZhHtml, models, cfg.MaxOutputTokens, cfg.Temperature, ct);
+                post.TitleZh, post.ContentZhHtml, cfg.OpenRouterApiKey, models, cfg.MaxOutputTokens, cfg.Temperature, ct);
 
             if (outcome.RateLimited)
             {
@@ -232,6 +248,90 @@ public class TranslationService
         }
 
         await _db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>
+    /// Embeds posts that have no vector yet (or whose content/model/dim changed), independent of
+    /// translation, so the semantic index covers the whole feed. Paced + key-rotated like
+    /// translation; defers on quota exhaustion. Embeds the ORIGINAL Chinese (multilingual model).
+    /// </summary>
+    private async Task EmbedPendingAsync(CancellationToken ct)
+    {
+        var cfg = await _settings.GetAsync(ct);
+        var keys = RuntimeSettingsService.ParseEmbedKeys(cfg);
+        var model = cfg.EmbeddingModel;
+        var dim = cfg.EmbeddingDim;
+
+        if (keys.Count == 0 || string.IsNullOrWhiteSpace(model))
+        {
+            Log(LogSeverity.Info, "embed_skipped", "Embedding paused — add a Gemini key and pick an embedding model in the dashboard.");
+            await _db.SaveChangesAsync(ct);
+            return;
+        }
+
+        var batch = await _db.Posts
+            .Include(p => p.Embedding)
+            .Where(p => p.Embedding == null
+                     || p.Embedding.SourceContentHash != p.SourceContentHash
+                     || p.Embedding.Model != model
+                     || p.Embedding.Dim != dim)
+            .Where(p => p.Embedding == null || p.Embedding.Attempts < cfg.EmbedMaxAttempts)
+            .OrderByDescending(p => p.Published) // freshest first
+            .Take(cfg.EmbedMaxPerTick)
+            .ToListAsync(ct);
+
+        if (batch.Count == 0) return;
+
+        _logger.LogInformation("Embedding {Count} post(s) this tick.", batch.Count);
+        bool any = false;
+
+        for (int i = 0; i < batch.Count; i++)
+        {
+            if (i > 0)
+                await Task.Delay(TimeSpan.FromSeconds(cfg.MinDelaySecondsBetweenCalls), ct);
+
+            var post = batch[i];
+            var text = post.TitleZh + "\n\n" + HtmlText.Preview(post.ContentZhHtml, 6000);
+            var outcome = await _embedder.EmbedAsync(text, model, dim, keys, "RETRIEVAL_DOCUMENT", ct);
+
+            if (outcome.AllKeysExhausted)
+            {
+                Log(LogSeverity.Warning, "embed_quota",
+                    "All Gemini embedding keys are rate-limited/exhausted; paused embedding for this tick.",
+                    v2exId: post.V2exId, model: model, httpStatus: outcome.HttpStatus, detail: outcome.Error);
+                await _db.SaveChangesAsync(ct);
+                break; // defer, no attempt charged
+            }
+
+            var emb = post.Embedding ??= new PostEmbedding { PostId = post.Id };
+
+            if (outcome.Success && outcome.Vector is not null)
+            {
+                emb.Vector = VectorBytes.Pack(outcome.Vector);
+                emb.Dim = outcome.Vector.Length;
+                emb.Model = model;
+                emb.SourceContentHash = post.SourceContentHash;
+                emb.EmbeddedAt = DateTimeOffset.UtcNow;
+                emb.Attempts = 0;
+                emb.LastError = null;
+                any = true;
+                Log(LogSeverity.Info, "embedded", $"Embedded post {post.V2exId}.", v2exId: post.V2exId, model: model);
+            }
+            else
+            {
+                emb.Attempts++;
+                emb.LastError = outcome.Error;
+                emb.Model = string.IsNullOrEmpty(emb.Model) ? model : emb.Model;
+                emb.Dim = emb.Dim == 0 ? dim : emb.Dim;
+                Log(LogSeverity.Warning, "embed_failed",
+                    $"Embedding post {post.V2exId} failed (attempt {emb.Attempts}): {outcome.Error}",
+                    v2exId: post.V2exId, model: model, httpStatus: outcome.HttpStatus, detail: outcome.Error);
+            }
+
+            await _db.SaveChangesAsync(ct);
+        }
+
+        if (any) _vectorCache.Invalidate();
     }
 
     private void Log(LogSeverity level, string evt, string message,

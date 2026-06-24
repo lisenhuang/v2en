@@ -52,4 +52,7 @@ public class Post
 
     /// <summary>When we first stored this post (NOT used for ordering).</summary>
     public DateTimeOffset FirstSeenUtc { get; set; }
+
+    /// <summary>Optional 1:1 vector embedding (side table) for semantic search / chat.</summary>
+    public PostEmbedding? Embedding { get; set; }
 }

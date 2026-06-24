@@ -16,12 +16,18 @@ public class RuntimeSettingsService
     private readonly AppDbContext _db;
     private readonly OpenRouterOptions _or;
     private readonly TranslationOptions _t;
+    private readonly GeminiOptions _g;
 
-    public RuntimeSettingsService(AppDbContext db, IOptions<OpenRouterOptions> or, IOptions<TranslationOptions> t)
+    public RuntimeSettingsService(
+        AppDbContext db,
+        IOptions<OpenRouterOptions> or,
+        IOptions<TranslationOptions> t,
+        IOptions<GeminiOptions> g)
     {
         _db = db;
         _or = or.Value;
         _t = t.Value;
+        _g = g.Value;
     }
 
     /// <summary>Get the settings row, creating it (seeded from Options) if it doesn't exist yet.</summary>
@@ -40,6 +46,12 @@ public class RuntimeSettingsService
             MaxAttempts = _t.MaxAttempts,
             MaxOutputTokens = _t.MaxOutputTokens,
             Temperature = _t.Temperature,
+            // Seed keys/models from config/env on first run; the DB is the source of truth after.
+            OpenRouterApiKey = _or.ApiKey ?? "",
+            GeminiEmbedKeysJson = SerializeEmbedKeys(_g.EmbedKeys),
+            EmbeddingModel = _g.EmbeddingModel,
+            EmbeddingDim = _g.EmbeddingDim,
+            ChatModel = string.IsNullOrWhiteSpace(_g.ChatModel) ? "gemini-2.5-flash" : _g.ChatModel,
             UpdatedUtc = DateTimeOffset.UtcNow,
         };
         _db.RuntimeSettings.Add(s);
@@ -63,5 +75,23 @@ public class RuntimeSettingsService
         JsonSerializer.Serialize(models
             .Select(m => m.Trim())
             .Where(m => m.Length > 0)
+            .ToList());
+
+    public static List<string> ParseEmbedKeys(RuntimeSettings s)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<List<string>>(s.GeminiEmbedKeysJson) ?? new();
+        }
+        catch (JsonException)
+        {
+            return new();
+        }
+    }
+
+    public static string SerializeEmbedKeys(IEnumerable<string> keys) =>
+        JsonSerializer.Serialize(keys
+            .Select(k => k.Trim())
+            .Where(k => k.Length > 0)
             .ToList());
 }

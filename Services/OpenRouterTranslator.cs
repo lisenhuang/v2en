@@ -45,6 +45,7 @@ public class OpenRouterTranslator
     public async Task<TranslationOutcome> TranslateAsync(
         string titleZh,
         string contentHtmlZh,
+        string apiKey,
         IReadOnlyList<string> models,
         int maxOutputTokens,
         double temperature,
@@ -83,7 +84,13 @@ public class OpenRouterTranslator
 
             try
             {
-                using var resp = await _http.PostAsJsonAsync("chat/completions", body, ct);
+                using var httpReq = new HttpRequestMessage(HttpMethod.Post, "chat/completions")
+                {
+                    Content = JsonContent.Create(body),
+                };
+                httpReq.Headers.Authorization =
+                    new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
+                using var resp = await _http.SendAsync(httpReq, ct);
                 var status = (int)resp.StatusCode;
 
                 if (resp.StatusCode == HttpStatusCode.TooManyRequests)

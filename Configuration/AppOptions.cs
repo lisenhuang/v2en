@@ -53,6 +53,22 @@ public class TranslationOptions
     public int MaxOutputTokens { get; set; } = 4096;
 }
 
+public class GeminiOptions
+{
+    public const string Section = "Gemini";
+
+    /// <summary>Seed for the server-side embedding key pool (the dashboard/DB is the source of truth after first run).</summary>
+    public List<string> EmbedKeys { get; set; } = new();
+
+    /// <summary>Seed default embedding model id (the admin picks from the live list afterwards).</summary>
+    public string EmbeddingModel { get; set; } = "";
+
+    public int EmbeddingDim { get; set; } = 768;
+
+    /// <summary>Seed default generateContent model used for chat answers.</summary>
+    public string ChatModel { get; set; } = "gemini-2.5-flash";
+}
+
 public class SiteOptions
 {
     public const string Section = "Site";

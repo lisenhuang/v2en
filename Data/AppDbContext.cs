@@ -12,6 +12,7 @@ public class AppDbContext : DbContext
     public DbSet<AdminUser> AdminUsers => Set<AdminUser>();
     public DbSet<RuntimeSettings> RuntimeSettings => Set<RuntimeSettings>();
     public DbSet<TranslationLog> TranslationLogs => Set<TranslationLog>();
+    public DbSet<PostEmbedding> PostEmbeddings => Set<PostEmbedding>();
 
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
     {
@@ -52,6 +53,14 @@ public class AppDbContext : DbContext
         log.Property(l => l.Level).HasConversion<int>();
         log.Property(l => l.Event).HasMaxLength(32);
         log.Property(l => l.Model).HasMaxLength(128);
+
+        var emb = modelBuilder.Entity<PostEmbedding>();
+        emb.HasIndex(e => e.PostId).IsUnique();
+        emb.HasOne(e => e.Post).WithOne(p => p.Embedding)
+           .HasForeignKey<PostEmbedding>(e => e.PostId)
+           .OnDelete(DeleteBehavior.Cascade);
+        emb.Property(e => e.Model).HasMaxLength(128);
+        emb.Property(e => e.SourceContentHash).HasMaxLength(64);
     }
 
     /// <summary>

@@ -10,7 +10,29 @@
 }
 
 <h1>Overview</h1>
-<p class="page-sub">Live status of the translation pipeline.</p>
+<p class="page-sub">Live status of the translation &amp; search pipeline.</p>
+
+@if (!Model.OpenRouterKeySet)
+{
+    <div class="alert err">
+        <strong>Translation is paused</strong> — set your OpenRouter key in
+        <a asp-page="/Admin/Settings">Settings → API keys</a>.
+    </div>
+}
+@if (!Model.EmbeddingConfigured)
+{
+    <div class="alert err">
+        <strong>Search &amp; chat are off</strong> — add a Google AI Studio key and pick an embedding model in
+        <a asp-page="/Admin/Settings">Settings</a>.
+    </div>
+}
+else if (!Model.Cfg.EnableChat)
+{
+    <div class="alert info">
+        Embedding is running (<strong>@Model.Embedded</strong> indexed). Turn on the public chat in
+        <a asp-page="/Admin/Settings">Settings → Chat</a> once enough posts are indexed.
+    </div>
+}
 
 <div class="card">
     <div class="card-head">
@@ -76,6 +98,11 @@
     <div class="stat">
         <div class="label">Total posts</div>
         <div class="value">@Model.Total</div>
+    </div>
+    <div class="stat">
+        <div class="label">Indexed (search)</div>
+        <div class="value">@Model.Embedded</div>
+        <div class="sub">@(Model.Cfg.EnableChat ? "chat on" : "chat off")</div>
     </div>
 </div>
 

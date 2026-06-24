@@ -1,0 +1,75 @@
+@page "/ask"
+@model v2en.Pages.AskModel
+@{
+    ViewData["Title"] = "Ask the feed";
+    ViewData["Description"] = "Ask questions about V2EX posts and get an English answer with sources.";
+}
+
+<section class="ask-intro">
+    <h1>Ask the feed</h1>
+    <p>Ask a question about recent V2EX posts — get an English answer with links to the sources.</p>
+</section>
+
+@if (!Model.Enabled)
+{
+    <div class="ask-card ask-disabled">
+        <p>💤 The chat isn't available right now. Please check back later.</p>
+    </div>
+}
+else
+{
+    <div class="ask-card">
+        <details class="ask-setup" id="ask-setup" open>
+            <summary>Your Google AI&nbsp;Studio key &amp; options</summary>
+            <div class="ask-setup-body">
+                <div class="ask-field">
+                    <label for="ask-key">Google AI Studio API key</label>
+                    <input type="password" id="ask-key" autocomplete="off" placeholder="AIza…" />
+                    <p class="ask-hint">
+                        Answers are generated with <strong>your own</strong> key.
+                        <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Get a free key →</a>
+                    </p>
+                </div>
+                <div class="ask-row">
+                    <label class="ask-check">
+                        <input type="checkbox" id="ask-remember" />
+                        <span>Remember on this device</span>
+                    </label>
+                    <div class="ask-field ask-window">
+                        <label for="ask-window">Time range</label>
+                        <select id="ask-window">
+                            <option value="24h">Last 24 hours</option>
+                            <option value="7d" selected>Last 7 days</option>
+                            <option value="30d">Last 30 days</option>
+                            <option value="all">All time</option>
+                        </select>
+                    </div>
+                </div>
+                <p class="ask-hint ask-privacy">
+                    🔒 Your key is sent to this site only to make this one request to Google on your behalf —
+                    it is never stored or logged on the server.
+                </p>
+            </div>
+        </details>
+
+        <div class="ask-thread" id="ask-thread">
+            <div class="ask-empty" id="ask-empty">
+                <p>Try: <button type="button" class="ask-chip" data-q="What are people discussing about AI? Summarize the main views.">“What are people discussing about AI?”</button>
+                <button type="button" class="ask-chip" data-q="Any interesting self-hosting or homelab posts? Summarize them.">“Self-hosting posts?”</button></p>
+            </div>
+        </div>
+
+        <form class="ask-composer" id="ask-form">
+            <textarea id="ask-input" rows="1" placeholder="Ask about the posts…" required></textarea>
+            <button type="submit" class="ask-send" id="ask-send" aria-label="Ask">
+                <span class="ask-send-label">Ask</span>
+            </button>
+        </form>
+    </div>
+
+    <p class="ask-foot">Answers are AI-generated from forum posts and may be inaccurate.</p>
+}
+
+@section Scripts {
+    <script src="~/js/ask.js" asp-append-version="true"></script>
+}

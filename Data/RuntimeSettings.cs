@@ -36,5 +36,33 @@ public class RuntimeSettings
 
     public double Temperature { get; set; } = 0.2;
 
+    // ── API keys (admin-managed, stored here in the DB) ───────────────────────────
+    /// <summary>OpenRouter API key for translation. Empty ⇒ translation paused.</summary>
+    public string OpenRouterApiKey { get; set; } = "";
+
+    /// <summary>JSON string[] of Google AI Studio keys for server-side embeddings (rotated/failed-over).</summary>
+    public string GeminiEmbedKeysJson { get; set; } = "[]";
+
+    // ── Embedding (semantic index) ────────────────────────────────────────────────
+    /// <summary>Gemini embedding model id, chosen by the admin from the live model list. Empty ⇒ embedding paused.</summary>
+    public string EmbeddingModel { get; set; } = "";
+
+    /// <summary>Embedding output dimensionality (must be supported by the chosen model).</summary>
+    public int EmbeddingDim { get; set; } = 768;
+
+    public int EmbedMaxPerTick { get; set; } = 16;
+    public int EmbedMaxAttempts { get; set; } = 5;
+
+    // ── Chat / retrieval (public "ask the feed") ──────────────────────────────────
+    /// <summary>Master switch for the public chat feature.</summary>
+    public bool EnableChat { get; set; }
+
+    /// <summary>Gemini generateContent model used for chat answers (run on the visitor's own key).</summary>
+    public string ChatModel { get; set; } = "gemini-2.5-flash";
+
+    public int RetrievalTopK { get; set; } = 8;
+    public int ChatMaxContextPosts { get; set; } = 8;
+    public int ChatRateLimitPerMinutePerIp { get; set; } = 6;
+
     public DateTimeOffset? UpdatedUtc { get; set; }
 }

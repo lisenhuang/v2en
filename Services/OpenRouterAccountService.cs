@@ -36,22 +36,25 @@ public class OpenRouterAccountService
         _logger = logger;
     }
 
-    /// <summary>Returns the account snapshot, or null if OpenRouter is unreachable.</summary>
-    public async Task<OpenRouterAccount?> GetAsync(CancellationToken ct = default)
+    /// <summary>Returns the account snapshot, or null if no key is set / OpenRouter is unreachable.</summary>
+    public async Task<OpenRouterAccount?> GetAsync(string? apiKey, CancellationToken ct = default)
     {
+        if (string.IsNullOrWhiteSpace(apiKey)) return null;
         if (_cache.TryGetValue(CacheKey, out OpenRouterAccount? cached))
             return cached;
 
-        var acct = await FetchAsync(ct);
+        var acct = await FetchAsync(apiKey, ct);
         if (acct is not null) _cache.Set(CacheKey, acct, CacheTtl);
         return acct;
     }
 
-    private async Task<OpenRouterAccount?> FetchAsync(CancellationToken ct)
+    private async Task<OpenRouterAccount?> FetchAsync(string apiKey, CancellationToken ct)
     {
         try
         {
-            using var resp = await _http.GetAsync("key", ct);
+            using var req = new HttpRequestMessage(HttpMethod.Get, "key");
+            req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
+            using var resp = await _http.SendAsync(req, ct);
             resp.EnsureSuccessStatusCode();
             await using var stream = await resp.Content.ReadAsStreamAsync(ct);
             using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: ct);

@@ -2,10 +2,21 @@
 @model v2en.Pages.Admin.SettingsModel
 @{
     ViewData["Title"] = "Settings";
+
+    // Build a dropdown's option ids: live list, with the current value guaranteed present.
+    IEnumerable<string> WithCurrent(IEnumerable<string> ids, string current)
+    {
+        var list = ids.ToList();
+        if (!string.IsNullOrWhiteSpace(current) && !list.Contains(current, StringComparer.OrdinalIgnoreCase))
+            list.Insert(0, current);
+        return list;
+    }
+    var embedOptions = WithCurrent(Model.EmbeddingModelOptions.Select(m => m.Id), Model.EmbeddingModel);
+    var chatOptions = WithCurrent(Model.ChatModelOptions.Select(m => m.Id), Model.ChatModel);
 }
 
 <h1>Settings</h1>
-<p class="page-sub">Changes apply on the next poll tick (within one interval). Free models only.</p>
+<p class="page-sub">Changes apply on the next poll tick (within one interval). Keys are stored in the database.</p>
 
 @if (Model.Saved)
 {
@@ -18,22 +29,59 @@
 
 <form method="post">
     <div class="card">
-        <h2>AI models — fallback order</h2>
+        <h2>API keys</h2>
+        <p class="hint">Stored in the database. Leave a field <strong>blank to keep the current value</strong> — saved keys are never shown back.</p>
+
+        <div class="field">
+            <label asp-for="OpenRouterApiKey">OpenRouter key (translation)</label>
+            <p class="hint">
+                @if (Model.OpenRouterKeySet)
+                {
+                    <span class="badge ok">set</span> <span>Translation is active.</span>
+                }
+                else
+                {
+                    <span class="badge warn">not set</span> <span>Translation is paused until you add a key.</span>
+                }
+            </p>
+            <input type="password" asp-for="OpenRouterApiKey" autocomplete="off"
+                   placeholder="@(Model.OpenRouterKeySet ? "•••••••• (leave blank to keep)" : "sk-or-…")" />
+        </div>
+
+        <div class="field">
+            <label asp-for="GeminiEmbedKeysText">Google AI Studio keys (embeddings &amp; search)</label>
+            <p class="hint">
+                @if (Model.GeminiKeyCount > 0)
+                {
+                    <span class="badge ok">@Model.GeminiKeyCount set</span>
+                }
+                else
+                {
+                    <span class="badge warn">none set</span>
+                }
+                <span>One key per line — they're rotated, so add several to multiply your free quota. Entering any value <strong>replaces</strong> the whole pool.</span>
+            </p>
+            <textarea asp-for="GeminiEmbedKeysText" rows="3" class="mono"
+                      style="width:100%; padding:10px 12px; border-radius:10px; border:1px solid var(--border); background:var(--bg); color:var(--text); resize:vertical;"
+                      placeholder="@(Model.GeminiKeyCount > 0 ? "•••••••• (leave blank to keep current keys)" : "AIza…\nAIza…")"></textarea>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>Translation — model fallback order</h2>
         <p class="hint">
-            One model id per line, tried top to bottom (the first that succeeds wins). Only
-            <span class="mono">:free</span> models are accepted. Tick a model below to add/remove it,
-            or edit the list directly to reorder.
+            One OpenRouter model id per line, tried top to bottom (first success wins). Only
+            <span class="mono">:free</span> models are accepted. Tick a model to add/remove it, or edit to reorder.
         </p>
         <div class="field">
             <textarea asp-for="ModelsText" id="ModelsText" rows="5" class="mono"
                       style="width:100%; padding:10px 12px; border-radius:10px; border:1px solid var(--border); background:var(--bg); color:var(--text); resize:vertical;"></textarea>
         </div>
-
         <div class="field">
             <label>Available free models @(Model.FreeModels.Count > 0 ? $"({Model.FreeModels.Count})" : "")</label>
             @if (Model.FreeModels.Count == 0)
             {
-                <p class="hint">Couldn't load the live list from OpenRouter right now — you can still type ids above.</p>
+                <p class="hint">Couldn't load the live list (set the OpenRouter key first) — you can still type ids above.</p>
             }
             else
             {
@@ -53,20 +101,18 @@
 
     <div class="card">
         <h2>Throughput &amp; quota</h2>
-
         <div class="field">
             <label class="check">
                 <input type="checkbox" asp-for="UnlimitedDaily" />
                 <span>
                     <strong>Unlimited daily translations</strong>
                     <span class="hint" style="display:block">
-                        Ignore the daily cap and keep translating every tick until OpenRouter's own free
-                        limit is hit (it pauses automatically on a rate-limit, then resumes).
+                        Ignore the daily cap and keep translating until OpenRouter's own free limit is hit
+                        (it pauses on a rate-limit, then resumes).
                     </span>
                 </span>
             </label>
         </div>
-
         <div class="form-grid">
             <div class="field">
                 <label asp-for="DailyQuota">Daily quota</label>
@@ -75,12 +121,12 @@
             </div>
             <div class="field">
                 <label asp-for="MaxPerTick">Max per tick</label>
-                <p class="hint">Posts translated each poll (every ~5 min).</p>
+                <p class="hint">Posts translated each poll (~5 min).</p>
                 <input type="number" asp-for="MaxPerTick" min="1" max="100" />
             </div>
             <div class="field">
                 <label asp-for="MinDelaySecondsBetweenCalls">Delay between calls (s)</label>
-                <p class="hint">Pacing inside a tick.</p>
+                <p class="hint">Pacing inside a tick (also paces embedding).</p>
                 <input type="number" asp-for="MinDelaySecondsBetweenCalls" min="0" max="300" />
             </div>
             <div class="field">
@@ -99,10 +145,87 @@
                 <input type="number" asp-for="Temperature" min="0" max="2" step="0.1" />
             </div>
         </div>
+    </div>
 
-        <div class="btn-row">
-            <button type="submit" class="btn btn-primary">Save settings</button>
+    <div class="card">
+        <h2>Embedding (semantic index)</h2>
+        <p class="hint">Every post is embedded (original Chinese) so the chat can search the whole feed. Model list is loaded live from Gemini once a key is set.</p>
+        <div class="form-grid">
+            <div class="field">
+                <label asp-for="EmbeddingModel">Embedding model</label>
+                <p class="hint">@(Model.EmbeddingModelOptions.Count > 0 ? $"{Model.EmbeddingModelOptions.Count} available" : "Add a Gemini key + save to load the list")</p>
+                <select asp-for="EmbeddingModel">
+                    <option value="">— select a model —</option>
+                    @foreach (var id in embedOptions)
+                    {
+                        <option value="@id">@id</option>
+                    }
+                </select>
+            </div>
+            <div class="field">
+                <label asp-for="EmbeddingDim">Dimensions</label>
+                <p class="hint">Must be supported by the model (e.g. 768). Lower = less storage.</p>
+                <input type="number" asp-for="EmbeddingDim" min="128" max="3072" />
+            </div>
+            <div class="field">
+                <label asp-for="EmbedMaxPerTick">Embed per tick</label>
+                <p class="hint">Posts embedded each poll. Raise to warm the index faster.</p>
+                <input type="number" asp-for="EmbedMaxPerTick" min="1" max="200" />
+            </div>
+            <div class="field">
+                <label asp-for="EmbedMaxAttempts">Max attempts</label>
+                <p class="hint">Give up embedding a post after this many failures.</p>
+                <input type="number" asp-for="EmbedMaxAttempts" min="1" max="20" />
+            </div>
         </div>
+        <p class="hint"><strong>Note:</strong> changing the model or dimensions re-embeds every post (a new vector space).</p>
+    </div>
+
+    <div class="card">
+        <h2>Chat &amp; retrieval</h2>
+        <div class="field">
+            <label class="check">
+                <input type="checkbox" asp-for="EnableChat" />
+                <span>
+                    <strong>Enable the public “Ask the feed” chat</strong>
+                    <span class="hint" style="display:block">
+                        Visitors ask questions using their own Google AI Studio key. Turn this on once a few
+                        posts are embedded (see Overview).
+                    </span>
+                </span>
+            </label>
+        </div>
+        <div class="form-grid">
+            <div class="field">
+                <label asp-for="ChatModel">Chat model</label>
+                <p class="hint">@(Model.ChatModelOptions.Count > 0 ? $"{Model.ChatModelOptions.Count} available" : "Loaded live from Gemini once a key is set")</p>
+                <select asp-for="ChatModel">
+                    @foreach (var id in chatOptions)
+                    {
+                        <option value="@id">@id</option>
+                    }
+                </select>
+            </div>
+            <div class="field">
+                <label asp-for="RetrievalTopK">Retrieved posts (top-K)</label>
+                <p class="hint">How many posts the search returns.</p>
+                <input type="number" asp-for="RetrievalTopK" min="1" max="50" />
+            </div>
+            <div class="field">
+                <label asp-for="ChatMaxContextPosts">Posts sent to the model</label>
+                <p class="hint">Context size for the answer.</p>
+                <input type="number" asp-for="ChatMaxContextPosts" min="1" max="30" />
+            </div>
+            <div class="field">
+                <label asp-for="ChatRateLimitPerMinutePerIp">Rate limit / IP / min</label>
+                <p class="hint">Protects the endpoint from abuse.</p>
+                <input type="number" asp-for="ChatRateLimitPerMinutePerIp" min="1" max="120" />
+            </div>
+        </div>
+    </div>
+
+    <div class="btn-row">
+        <button type="submit" class="btn btn-primary">Save settings</button>
     </div>
 </form>
 

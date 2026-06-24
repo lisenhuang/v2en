@@ -26,21 +26,24 @@ public class OpenRouterModelsService
         _logger = logger;
     }
 
-    public async Task<IReadOnlyList<OpenRouterModel>> GetFreeModelsAsync(CancellationToken ct = default)
+    public async Task<IReadOnlyList<OpenRouterModel>> GetFreeModelsAsync(string? apiKey, CancellationToken ct = default)
     {
         if (_cache.TryGetValue(CacheKey, out IReadOnlyList<OpenRouterModel>? cached) && cached is not null)
             return cached;
 
-        var models = await FetchFreeModelsAsync(ct);
-        _cache.Set(CacheKey, models, CacheTtl);
+        var models = await FetchFreeModelsAsync(apiKey, ct);
+        if (models.Count > 0) _cache.Set(CacheKey, models, CacheTtl);
         return models;
     }
 
-    private async Task<IReadOnlyList<OpenRouterModel>> FetchFreeModelsAsync(CancellationToken ct)
+    private async Task<IReadOnlyList<OpenRouterModel>> FetchFreeModelsAsync(string? apiKey, CancellationToken ct)
     {
         try
         {
-            using var resp = await _http.GetAsync("models", ct);
+            using var req = new HttpRequestMessage(HttpMethod.Get, "models");
+            if (!string.IsNullOrWhiteSpace(apiKey))
+                req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
+            using var resp = await _http.SendAsync(req, ct);
             resp.EnsureSuccessStatusCode();
             await using var stream = await resp.Content.ReadAsStreamAsync(ct);
             using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: ct);

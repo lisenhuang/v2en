@@ -18,7 +18,7 @@ public class IndexModel : PageModel
         _account = account;
     }
 
-    public int Pending, Translated, Failed, Total;
+    public int Pending, Translated, Failed, Total, Embedded;
     public FeedState State = new() { Id = 1 };
     public RuntimeSettings Cfg = new();
     public List<string> Models = new();
@@ -28,12 +28,17 @@ public class IndexModel : PageModel
     public int UsedToday => State.TranslationsToday;
     public int? FreeRemaining => Account is null ? null : Math.Max(0, Account.FreeDailyRequestLimit - UsedToday);
 
+    public bool OpenRouterKeySet => !string.IsNullOrWhiteSpace(Cfg.OpenRouterApiKey);
+    public int GeminiKeyCount => RuntimeSettingsService.ParseEmbedKeys(Cfg).Count;
+    public bool EmbeddingConfigured => GeminiKeyCount > 0 && !string.IsNullOrWhiteSpace(Cfg.EmbeddingModel);
+
     public async Task OnGetAsync(CancellationToken ct)
     {
         Pending = await _db.Posts.CountAsync(p => p.Status == TranslationStatus.Pending, ct);
         Translated = await _db.Posts.CountAsync(p => p.Status == TranslationStatus.Translated, ct);
         Failed = await _db.Posts.CountAsync(p => p.Status == TranslationStatus.Failed, ct);
         Total = await _db.Posts.CountAsync(ct);
+        Embedded = await _db.PostEmbeddings.CountAsync(ct);
 
         State = await _db.FeedStates.AsNoTracking().FirstOrDefaultAsync(s => s.Id == 1, ct) ?? new FeedState { Id = 1 };
         Cfg = await _settings.GetAsync(ct);
@@ -45,6 +50,6 @@ public class IndexModel : PageModel
             .Take(6)
             .ToListAsync(ct);
 
-        Account = await _account.GetAsync(ct);
+        Account = await _account.GetAsync(Cfg.OpenRouterApiKey, ct);
     }
 }

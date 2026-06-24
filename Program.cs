@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
 using v2en.Configuration;
 using v2en.Data;
@@ -14,27 +15,11 @@ builder.Services.Configure<FeedOptions>(builder.Configuration.GetSection(FeedOpt
 builder.Services.Configure<OpenRouterOptions>(builder.Configuration.GetSection(OpenRouterOptions.Section));
 builder.Services.Configure<TranslationOptions>(builder.Configuration.GetSection(TranslationOptions.Section));
 builder.Services.Configure<SiteOptions>(builder.Configuration.GetSection(SiteOptions.Section));
+builder.Services.Configure<GeminiOptions>(builder.Configuration.GetSection(GeminiOptions.Section));
 
-// ── Required: OpenRouter API key (fail fast with clear setup instructions) ───────
-var orKey = builder.Configuration[$"{OpenRouterOptions.Section}:ApiKey"];
-if (string.IsNullOrWhiteSpace(orKey))
-{
-    using var logFactory = LoggerFactory.Create(b => b.AddConsole());
-    logFactory.CreateLogger("Startup").LogCritical(
-        "\n\n" +
-        "  ╔══════════════════════════════════════════════════════════════════╗\n" +
-        "  ║           OpenRouter API key is not configured                  ║\n" +
-        "  ╠══════════════════════════════════════════════════════════════════╣\n" +
-        "  ║  DEV — add it via user-secrets (never put it in source):        ║\n" +
-        "  ║    dotnet user-secrets set \"OpenRouter:ApiKey\" \"sk-or-...\"       ║\n" +
-        "  ║                                                                  ║\n" +
-        "  ║  DOCKER / PROD — set the environment variable:                  ║\n" +
-        "  ║    OpenRouter__ApiKey=sk-or-...                                  ║\n" +
-        "  ║                                                                  ║\n" +
-        "  ║  Get a free key at: https://openrouter.ai/keys                  ║\n" +
-        "  ╚══════════════════════════════════════════════════════════════════╝\n");
-    return 1;
-}
+// API keys (OpenRouter translation key + Gemini embedding key pool) are MANAGED IN THE ADMIN
+// DASHBOARD and stored in the DB; they are seeded from config/env on first run. The app starts
+// without them — translation and embedding simply pause (logged) until the admin sets them.
 
 // ── SQLite + EF Core (WAL set once at startup; busy_timeout per-connection) ──────
 builder.Services.AddSingleton<BusyTimeoutInterceptor>();
@@ -51,36 +36,30 @@ builder.Services.AddHttpClient<V2exFeedClient>((sp, client) =>
     client.DefaultRequestHeaders.UserAgent.TryParseAdd(opts.UserAgent);
 }).AddStandardResilienceHandler();
 
-// ── OpenRouterTranslator: custom pipeline — NEVER retry 429 (burns daily quota) ──
-builder.Services.AddHttpClient<OpenRouterTranslator>((sp, client) =>
-{
-    var opts = sp.GetRequiredService<IOptions<OpenRouterOptions>>().Value;
-    client.BaseAddress = new Uri(opts.BaseUrl.TrimEnd('/') + '/');
-    client.DefaultRequestHeaders.Authorization =
-        new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", opts.ApiKey);
-    if (!string.IsNullOrWhiteSpace(opts.Referer))
-        client.DefaultRequestHeaders.TryAddWithoutValidation("HTTP-Referer", opts.Referer);
-    if (!string.IsNullOrWhiteSpace(opts.Title))
-        client.DefaultRequestHeaders.TryAddWithoutValidation("X-Title", opts.Title);
-});
-// No AddResilienceHandler for OpenRouterTranslator — OpenRouterTranslator has its own
-// model-fallback chain and 429 handling; HTTP-level retries would burn the daily quota.
-
-// ── OpenRouter dashboard helpers: live :free model list + account/quota snapshot ──
+// ── OpenRouter clients: base address only — the API key is read per-request from the DB ──
+// (No AddResilienceHandler for the translator — it has its own model-fallback + 429 handling.)
 static void ConfigureOpenRouterClient(IServiceProvider sp, HttpClient client)
 {
     var opts = sp.GetRequiredService<IOptions<OpenRouterOptions>>().Value;
     client.BaseAddress = new Uri(opts.BaseUrl.TrimEnd('/') + '/');
-    client.DefaultRequestHeaders.Authorization =
-        new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", opts.ApiKey);
 }
+builder.Services.AddHttpClient<OpenRouterTranslator>(ConfigureOpenRouterClient);
 builder.Services.AddHttpClient<OpenRouterModelsService>(ConfigureOpenRouterClient);
 builder.Services.AddHttpClient<OpenRouterAccountService>(ConfigureOpenRouterClient);
 
+// ── Gemini clients (embeddings + chat + live model list). Keys are per-request. ──
+const string GeminiBase = "https://generativelanguage.googleapis.com/";
+builder.Services.AddHttpClient<GeminiModelsService>(c => c.BaseAddress = new Uri(GeminiBase));
+builder.Services.AddHttpClient<GeminiEmbeddingService>(c => c.BaseAddress = new Uri(GeminiBase));
+builder.Services.AddHttpClient<GeminiChatService>(c => c.BaseAddress = new Uri(GeminiBase));
+
 // ── Application services ──────────────────────────────────────────────────────────
 builder.Services.AddSingleton<HtmlSanitizerService>();
+builder.Services.AddSingleton<GeminiKeyCursor>();
+builder.Services.AddSingleton<VectorCache>();
 builder.Services.AddScoped<RuntimeSettingsService>();
 builder.Services.AddScoped<TranslationService>();
+builder.Services.AddScoped<RetrievalService>();
 builder.Services.AddHostedService<FeedWorker>();
 builder.Services.AddMemoryCache();
 
@@ -139,7 +118,48 @@ using (var scope = app.Services.CreateScope())
     db.Database.ExecuteSqlRaw("PRAGMA journal_mode=WAL;");
 
     // Seed the runtime-settings row from appsettings on first run (DB is source of truth after).
-    await scope.ServiceProvider.GetRequiredService<RuntimeSettingsService>().GetAsync();
+    var rss = scope.ServiceProvider.GetRequiredService<RuntimeSettingsService>();
+    var cfgRow = await rss.GetAsync();
+
+    // Back-compat upgrade: an already-deployed site keeps its OpenRouter key (and any Gemini
+    // seed) in config/env. On the first run after this release the DB row already EXISTS, so the
+    // first-run seed above doesn't fire — copy the config keys into the row once so translation
+    // (and embedding) keep working without the admin re-entering anything.
+    var orOpts = scope.ServiceProvider.GetRequiredService<IOptions<OpenRouterOptions>>().Value;
+    var gOpts = scope.ServiceProvider.GetRequiredService<IOptions<GeminiOptions>>().Value;
+    var migrated = false;
+    if (string.IsNullOrWhiteSpace(cfgRow.OpenRouterApiKey) && !string.IsNullOrWhiteSpace(orOpts.ApiKey))
+    {
+        cfgRow.OpenRouterApiKey = orOpts.ApiKey;
+        migrated = true;
+    }
+    if (RuntimeSettingsService.ParseEmbedKeys(cfgRow).Count == 0 && gOpts.EmbedKeys.Count > 0)
+    {
+        cfgRow.GeminiEmbedKeysJson = RuntimeSettingsService.SerializeEmbedKeys(gOpts.EmbedKeys);
+        migrated = true;
+    }
+    if (string.IsNullOrWhiteSpace(cfgRow.EmbeddingModel) && !string.IsNullOrWhiteSpace(gOpts.EmbeddingModel))
+    {
+        cfgRow.EmbeddingModel = gOpts.EmbeddingModel;
+        migrated = true;
+    }
+
+    // The migration backfilled these NEW columns on the existing prod row with 0/"" (the SQL
+    // default), not the intended C# defaults. Every one clamps to ≥1, so 0/empty unambiguously
+    // means "never set" — normalize to safe defaults so embedding/chat work out of the box.
+    if (cfgRow.EmbeddingDim <= 0) { cfgRow.EmbeddingDim = 768; migrated = true; }
+    if (cfgRow.EmbedMaxPerTick <= 0) { cfgRow.EmbedMaxPerTick = 16; migrated = true; }
+    if (cfgRow.EmbedMaxAttempts <= 0) { cfgRow.EmbedMaxAttempts = 5; migrated = true; }
+    if (cfgRow.RetrievalTopK <= 0) { cfgRow.RetrievalTopK = 8; migrated = true; }
+    if (cfgRow.ChatMaxContextPosts <= 0) { cfgRow.ChatMaxContextPosts = 8; migrated = true; }
+    if (cfgRow.ChatRateLimitPerMinutePerIp <= 0) { cfgRow.ChatRateLimitPerMinutePerIp = 6; migrated = true; }
+    if (string.IsNullOrWhiteSpace(cfgRow.ChatModel)) { cfgRow.ChatModel = "gemini-2.5-flash"; migrated = true; }
+
+    if (migrated)
+    {
+        cfgRow.UpdatedUtc = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync();
+    }
 
     // ── Seed / enforce the admin account ─────────────────────────────────────────
     // Contract:
@@ -229,5 +249,99 @@ app.MapGet("/index.xml", async (
     return Results.Content(xml, "application/atom+xml;charset=UTF-8");
 });
 
+// ── Public "ask the feed" chat: retrieve over post embeddings, answer with the VISITOR's key ──
+app.MapPost("/api/chat", async (
+    ChatRequest req,
+    RuntimeSettingsService settingsSvc,
+    RetrievalService retrieval,
+    GeminiChatService chat,
+    AppDbContext db,
+    IMemoryCache cache,
+    HttpContext ctx,
+    CancellationToken ct) =>
+{
+    var cfg = await settingsSvc.GetAsync(ct);
+    if (!cfg.EnableChat) return Results.NotFound();
+
+    var question = (req.Question ?? "").Trim();
+    if (question.Length == 0) return Results.BadRequest(new { error = "Please enter a question." });
+    if (question.Length > 1000) question = question[..1000];
+    if (string.IsNullOrWhiteSpace(req.ApiKey))
+        return Results.BadRequest(new { error = "Add your Google AI Studio key to ask." });
+
+    // English-only: short-circuit obvious non-English (CJK) questions before spending any quota.
+    // (Other non-English scripts are caught by the model's system instruction.)
+    if (LooksPredominantlyCjk(question))
+        return Results.Ok(new { answer = "Please ask your question in English.", sources = Array.Empty<object>() });
+
+    // Per-IP fixed-window rate limit (IP is trustworthy: UseForwardedHeaders is configured).
+    var ip = ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+    var bucket = $"chat_rl:{ip}:{DateTimeOffset.UtcNow:yyyyMMddHHmm}";
+    var used = cache.Get<int>(bucket);
+    if (used >= Math.Max(1, cfg.ChatRateLimitPerMinutePerIp))
+        return Results.Json(new { error = "You're asking too fast — wait a minute and try again." }, statusCode: 429);
+    cache.Set(bucket, used + 1, TimeSpan.FromMinutes(1));
+
+    var embedKeys = RuntimeSettingsService.ParseEmbedKeys(cfg);
+    if (embedKeys.Count == 0 || string.IsNullOrWhiteSpace(cfg.EmbeddingModel))
+        return Results.Json(new { error = "Search isn't available right now." }, statusCode: 503);
+
+    var window = RetrievalService.ParseWindow(req.Window);
+    var search = await retrieval.SearchAsync(question, cfg.EmbeddingModel, cfg.EmbeddingDim, window, cfg.RetrievalTopK, embedKeys, ct);
+    if (search.Error is not null)
+        return Results.Json(new { error = search.Error }, statusCode: 503);
+    if (search.Hits.Count == 0)
+        return Results.Ok(new { answer = "I couldn't find any matching posts in that time window yet.", sources = Array.Empty<object>() });
+
+    var contextPosts = search.Hits.Take(Math.Max(1, cfg.ChatMaxContextPosts)).ToList();
+    var result = await chat.AnswerAsync(question, req.ApiKey!, cfg.ChatModel, contextPosts, ct);
+
+    // Dashboard log — NEVER the visitor's key.
+    db.TranslationLogs.Add(new TranslationLog
+    {
+        Utc = DateTimeOffset.UtcNow,
+        Level = result.Success ? LogSeverity.Info : LogSeverity.Warning,
+        Event = result.Success ? "chat" : "chat_failed",
+        Model = cfg.ChatModel,
+        HttpStatus = result.HttpStatus,
+        Message = result.Success
+            ? $"Answered a question ({contextPosts.Count} source(s), {window})."
+            : $"Chat failed: {result.Error}",
+    });
+    await db.SaveChangesAsync(ct);
+
+    if (!result.Success)
+    {
+        var code = result.HttpStatus is int s && s is >= 400 and < 600 ? s : 502;
+        return Results.Json(new { error = result.Error ?? "The AI request failed." }, statusCode: code);
+    }
+
+    return Results.Ok(new
+    {
+        answer = result.Answer,
+        sources = result.Sources.Select(x => new { id = x.V2exId, title = x.Title, url = x.Url, published = x.Published }),
+    });
+});
+
 await app.RunAsync();
 return 0;
+
+// Heuristic: a question is "predominantly CJK" (Chinese/Japanese/Korean) when CJK letters are at
+// least half of its letters — a strong signal it isn't English. Conservative on purpose so an
+// English question that merely quotes a Chinese term still passes through to the model.
+static bool LooksPredominantlyCjk(string s)
+{
+    int cjk = 0, letters = 0;
+    foreach (var ch in s)
+    {
+        if (char.IsLetter(ch)) letters++;
+        if (ch is (>= '一' and <= '鿿')   // CJK ideographs
+              or (>= '぀' and <= 'ヿ')     // Hiragana + Katakana
+              or (>= '가' and <= '힯'))    // Hangul
+            cjk++;
+    }
+    return letters > 0 && cjk * 2 >= letters;
+}
+
+/// <summary>Public chat request body. ApiKey is the visitor's own Gemini key — used once, never stored.</summary>
+record ChatRequest(string? Question, string? ApiKey, string? Window);
