@@ -1,0 +1,158 @@
+@page
+@model v2en.Pages.Admin.IndexModel
+@{
+    ViewData["Title"] = "Overview";
+
+    int quotaPct = Model.Cfg.DailyQuota > 0
+        ? Math.Min(100, (int)Math.Round(100.0 * Model.UsedToday / Model.Cfg.DailyQuota))
+        : 0;
+    string quotaClass = quotaPct >= 100 ? "err" : quotaPct >= 80 ? "warn" : "";
+}
+
+<h1>Overview</h1>
+<p class="page-sub">Live status of the translation pipeline.</p>
+
+<div class="card">
+    <div class="card-head">
+        <h2>Today's translation quota</h2>
+        @if (Model.Cfg.UnlimitedDaily)
+        {
+            <span class="badge ok">Unlimited</span>
+        }
+        else
+        {
+            <span class="badge @(quotaPct >= 100 ? "err" : "info")">@Model.UsedToday / @Model.Cfg.DailyQuota</span>
+        }
+    </div>
+
+    @if (Model.Cfg.UnlimitedDaily)
+    {
+        <p class="muted">
+            Unlimited mode is on — translating every tick until OpenRouter's own free limit is hit.
+            <strong>@Model.UsedToday</strong> call(s) made today.
+        </p>
+    }
+    else
+    {
+        <div class="meter @quotaClass"><span style="width:@(quotaPct)%"></span></div>
+        <p class="muted" style="margin-top:8px">
+            <strong>@Model.UsedToday</strong> of <strong>@Model.Cfg.DailyQuota</strong> calls used today
+            (counts successes and hard failures).
+            @if (Model.State.QuotaWindowResetUtc is not null)
+            {
+                <text>Resets <time datetime="@Model.State.QuotaWindowResetUtc.Value.ToString("o")">@Model.State.QuotaWindowResetUtc.Value.ToString("u")</time>.</text>
+            }
+        </p>
+    }
+
+    @if (Model.Account is not null)
+    {
+        <p class="muted" style="margin-top:6px">
+            OpenRouter account (@(Model.Account.IsFreeTier ? "free tier" : "credited tier")):
+            free-model limit ≈ <strong>@Model.Account.FreeDailyRequestLimit/day</strong> →
+            roughly <strong>@Model.FreeRemaining</strong> free call(s) left today <span class="muted">(estimate)</span>.
+            Credits used today: $@Model.Account.UsageDaily.ToString("0.####").
+        </p>
+    }
+    else
+    {
+        <p class="muted" style="margin-top:6px">OpenRouter account info unavailable right now.</p>
+    }
+</div>
+
+<div class="stats">
+    <div class="stat ok">
+        <div class="label">Translated</div>
+        <div class="value">@Model.Translated</div>
+    </div>
+    <div class="stat">
+        <div class="label">Pending</div>
+        <div class="value">@Model.Pending</div>
+    </div>
+    <div class="stat @(Model.Failed > 0 ? "err" : "")">
+        <div class="label">Failed</div>
+        <div class="value">@Model.Failed</div>
+    </div>
+    <div class="stat">
+        <div class="label">Total posts</div>
+        <div class="value">@Model.Total</div>
+    </div>
+</div>
+
+<div class="card">
+    <h2>Pipeline</h2>
+    <table class="table">
+        <tbody>
+            <tr>
+                <th style="width:200px">Last feed fetch</th>
+                <td>
+                    @if (Model.State.LastFetchUtc is not null)
+                    {
+                        <time datetime="@Model.State.LastFetchUtc.Value.ToString("o")">@Model.State.LastFetchUtc.Value.ToString("u")</time>
+                        <span class="muted">· HTTP @(Model.State.LastStatusCode?.ToString() ?? "—")</span>
+                    }
+                    else
+                    {
+                        <span class="muted">not yet</span>
+                    }
+                </td>
+            </tr>
+            <tr>
+                <th>Models (fallback order)</th>
+                <td>
+                    @if (Model.Models.Count == 0)
+                    {
+                        <span class="badge err">none configured</span>
+                        <span class="muted">— set at least one in <a asp-page="/Admin/Settings">Settings</a>.</span>
+                    }
+                    else
+                    {
+                        <div class="chips">
+                            @foreach (var m in Model.Models)
+                            {
+                                <span class="chip">@m</span>
+                            }
+                        </div>
+                    }
+                </td>
+            </tr>
+            <tr>
+                <th>Pacing</th>
+                <td class="muted">
+                    @Model.Cfg.MaxPerTick per tick · @Model.Cfg.MinDelaySecondsBetweenCalls s between calls ·
+                    @Model.Cfg.MaxAttempts max attempts · @Model.Cfg.MaxOutputTokens output tokens
+                </td>
+            </tr>
+        </tbody>
+    </table>
+</div>
+
+<div class="card">
+    <div class="card-head">
+        <h2>Recent issues</h2>
+        <a asp-page="/Admin/Logs" class="btn btn-ghost btn-sm">View all logs</a>
+    </div>
+    @if (Model.RecentIssues.Count == 0)
+    {
+        <p class="empty">No warnings or errors recorded. 🎉</p>
+    }
+    else
+    {
+        <table class="table">
+            <thead>
+                <tr><th class="nowrap">When</th><th>Level</th><th>Post</th><th>Message</th></tr>
+            </thead>
+            <tbody>
+                @foreach (var l in Model.RecentIssues)
+                {
+                    <tr>
+                        <td class="nowrap"><time datetime="@l.Utc.ToString("o")">@l.Utc.ToString("u")</time></td>
+                        <td><span class="badge @(l.Level == LogSeverity.Error ? "err" : "warn")">@l.Level</span></td>
+                        <td class="nowrap">@(l.V2exId is null ? "—" : $"#{l.V2exId}")</td>
+                        <td>@l.Message</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+</div>

@@ -1,0 +1,92 @@
+@page
+@model v2en.Pages.Admin.LogsModel
+@{
+    ViewData["Title"] = "Logs";
+    string FilterClass(string f) => Model.Filter == f ? "btn btn-sm btn-primary" : "btn btn-sm";
+}
+
+<h1>Logs</h1>
+<p class="page-sub">Translation events — failures include the raw error returned by the AI API.</p>
+
+<div class="toolbar">
+    <a asp-page="/Admin/Logs" asp-route-Filter="all" class="@FilterClass("all")">All</a>
+    <a asp-page="/Admin/Logs" asp-route-Filter="issues" class="@FilterClass("issues")">Warnings + errors</a>
+    <a asp-page="/Admin/Logs" asp-route-Filter="error" class="@FilterClass("error")">Errors only</a>
+    <span class="spacer"></span>
+    <span class="muted nowrap">@Model.Total entr@(Model.Total == 1 ? "y" : "ies")</span>
+    <form method="post" asp-page-handler="Clear" asp-route-Filter="@Model.Filter"
+          onsubmit="return confirm('Delete all log entries?');" class="inline-form">
+        <button type="submit" class="btn btn-sm btn-ghost">Clear</button>
+    </form>
+</div>
+
+<div class="card">
+    @if (Model.Logs.Count == 0)
+    {
+        <p class="empty">No log entries@(Model.Filter == "all" ? "" : " for this filter").</p>
+    }
+    else
+    {
+        <table class="table">
+            <thead>
+                <tr>
+                    <th class="nowrap">When</th>
+                    <th>Level</th>
+                    <th>Event</th>
+                    <th>Post</th>
+                    <th>Model</th>
+                    <th>Message</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var l in Model.Logs)
+                {
+                    var cls = l.Level == LogSeverity.Error ? "err" : l.Level == LogSeverity.Warning ? "warn" : "info";
+                    <tr>
+                        <td class="nowrap"><time datetime="@l.Utc.ToString("o")">@l.Utc.ToString("u")</time></td>
+                        <td><span class="badge @cls">@l.Level</span></td>
+                        <td class="mono">@l.Event</td>
+                        <td class="nowrap">
+                            @if (l.V2exId is not null)
+                            {
+                                <a href="/t/@l.V2exId" target="_blank">#@l.V2exId</a>
+                            }
+                            else
+                            {
+                                <span class="muted">—</span>
+                            }
+                        </td>
+                        <td class="mono">@(l.Model ?? "—")@(l.HttpStatus is int s ? $" · {s}" : "")</td>
+                        <td>
+                            @l.Message
+                            @if (!string.IsNullOrEmpty(l.Detail))
+                            {
+                                <details class="logdetail">
+                                    <summary>error detail</summary>
+                                    <pre>@l.Detail</pre>
+                                </details>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+</div>
+
+@if (Model.TotalPages > 1)
+{
+    <div class="toolbar">
+        @if (Model.P > 1)
+        {
+            <a class="btn btn-sm" asp-page="/Admin/Logs" asp-route-Filter="@Model.Filter" asp-route-P="@(Model.P - 1)">← Newer</a>
+        }
+        <span class="spacer"></span>
+        <span class="muted">Page @Model.P of @Model.TotalPages</span>
+        <span class="spacer"></span>
+        @if (Model.P < Model.TotalPages)
+        {
+            <a class="btn btn-sm" asp-page="/Admin/Logs" asp-route-Filter="@Model.Filter" asp-route-P="@(Model.P + 1)">Older →</a>
+        }
+    </div>
+}

@@ -1,0 +1,131 @@
+@page
+@model v2en.Pages.Admin.SettingsModel
+@{
+    ViewData["Title"] = "Settings";
+}
+
+<h1>Settings</h1>
+<p class="page-sub">Changes apply on the next poll tick (within one interval). Free models only.</p>
+
+@if (Model.Saved)
+{
+    <div class="alert ok">Settings saved.</div>
+}
+@if (Model.Error is not null)
+{
+    <div class="alert err">@Model.Error</div>
+}
+
+<form method="post">
+    <div class="card">
+        <h2>AI models — fallback order</h2>
+        <p class="hint">
+            One model id per line, tried top to bottom (the first that succeeds wins). Only
+            <span class="mono">:free</span> models are accepted. Tick a model below to add/remove it,
+            or edit the list directly to reorder.
+        </p>
+        <div class="field">
+            <textarea asp-for="ModelsText" id="ModelsText" rows="5" class="mono"
+                      style="width:100%; padding:10px 12px; border-radius:10px; border:1px solid var(--border); background:var(--bg); color:var(--text); resize:vertical;"></textarea>
+        </div>
+
+        <div class="field">
+            <label>Available free models @(Model.FreeModels.Count > 0 ? $"({Model.FreeModels.Count})" : "")</label>
+            @if (Model.FreeModels.Count == 0)
+            {
+                <p class="hint">Couldn't load the live list from OpenRouter right now — you can still type ids above.</p>
+            }
+            else
+            {
+                <div class="model-list">
+                    @foreach (var m in Model.FreeModels)
+                    {
+                        <label class="model-row">
+                            <input type="checkbox" class="model-cb" value="@m.Id" />
+                            <span class="mid">@m.Id</span>
+                            <span class="mmeta">@(m.ContextLength is long c ? $"{c / 1000}k ctx" : "")</span>
+                        </label>
+                    }
+                </div>
+            }
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>Throughput &amp; quota</h2>
+
+        <div class="field">
+            <label class="check">
+                <input type="checkbox" asp-for="UnlimitedDaily" />
+                <span>
+                    <strong>Unlimited daily translations</strong>
+                    <span class="hint" style="display:block">
+                        Ignore the daily cap and keep translating every tick until OpenRouter's own free
+                        limit is hit (it pauses automatically on a rate-limit, then resumes).
+                    </span>
+                </span>
+            </label>
+        </div>
+
+        <div class="form-grid">
+            <div class="field">
+                <label asp-for="DailyQuota">Daily quota</label>
+                <p class="hint">Max calls/day when Unlimited is off.</p>
+                <input type="number" asp-for="DailyQuota" min="1" max="100000" />
+            </div>
+            <div class="field">
+                <label asp-for="MaxPerTick">Max per tick</label>
+                <p class="hint">Posts translated each poll (every ~5 min).</p>
+                <input type="number" asp-for="MaxPerTick" min="1" max="100" />
+            </div>
+            <div class="field">
+                <label asp-for="MinDelaySecondsBetweenCalls">Delay between calls (s)</label>
+                <p class="hint">Pacing inside a tick.</p>
+                <input type="number" asp-for="MinDelaySecondsBetweenCalls" min="0" max="300" />
+            </div>
+            <div class="field">
+                <label asp-for="MaxAttempts">Max attempts</label>
+                <p class="hint">Give up on a post after this many failures.</p>
+                <input type="number" asp-for="MaxAttempts" min="1" max="20" />
+            </div>
+            <div class="field">
+                <label asp-for="MaxOutputTokens">Max output tokens</label>
+                <p class="hint">Higher = fewer truncations on long posts.</p>
+                <input type="number" asp-for="MaxOutputTokens" min="256" max="32000" />
+            </div>
+            <div class="field">
+                <label asp-for="Temperature">Temperature</label>
+                <p class="hint">0–2. Lower = more literal.</p>
+                <input type="number" asp-for="Temperature" min="0" max="2" step="0.1" />
+            </div>
+        </div>
+
+        <div class="btn-row">
+            <button type="submit" class="btn btn-primary">Save settings</button>
+        </div>
+    </div>
+</form>
+
+@section Scripts {
+    <script>
+        (function () {
+            var ta = document.getElementById('ModelsText');
+            if (!ta) return;
+            function lines() { return ta.value.split('\n').map(function (s) { return s.trim(); }).filter(Boolean); }
+            function syncChecks() {
+                var set = lines();
+                document.querySelectorAll('.model-cb').forEach(function (cb) { cb.checked = set.indexOf(cb.value) !== -1; });
+            }
+            document.querySelectorAll('.model-cb').forEach(function (cb) {
+                cb.addEventListener('change', function () {
+                    var arr = lines(), i = arr.indexOf(cb.value);
+                    if (cb.checked && i === -1) arr.push(cb.value);
+                    else if (!cb.checked && i !== -1) arr.splice(i, 1);
+                    ta.value = arr.join('\n');
+                });
+            });
+            ta.addEventListener('input', syncChecks);
+            syncChecks();
+        })();
+    </script>
+}

@@ -9,6 +9,9 @@ public class AppDbContext : DbContext
 
     public DbSet<Post> Posts => Set<Post>();
     public DbSet<FeedState> FeedStates => Set<FeedState>();
+    public DbSet<AdminUser> AdminUsers => Set<AdminUser>();
+    public DbSet<RuntimeSettings> RuntimeSettings => Set<RuntimeSettings>();
+    public DbSet<TranslationLog> TranslationLogs => Set<TranslationLog>();
 
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
     {
@@ -38,6 +41,17 @@ public class AppDbContext : DbContext
 
         // Singleton state row.
         modelBuilder.Entity<FeedState>().HasData(new FeedState { Id = 1 });
+
+        var admin = modelBuilder.Entity<AdminUser>();
+        admin.HasIndex(a => a.Username).IsUnique();
+        admin.Property(a => a.Username).HasMaxLength(128);
+
+        var log = modelBuilder.Entity<TranslationLog>();
+        log.HasIndex(l => l.Utc);
+        log.HasIndex(l => l.Level);
+        log.Property(l => l.Level).HasConversion<int>();
+        log.Property(l => l.Event).HasMaxLength(32);
+        log.Property(l => l.Model).HasMaxLength(128);
     }
 
     /// <summary>

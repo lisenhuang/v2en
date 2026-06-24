@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -65,14 +66,47 @@ builder.Services.AddHttpClient<OpenRouterTranslator>((sp, client) =>
 // No AddResilienceHandler for OpenRouterTranslator — OpenRouterTranslator has its own
 // model-fallback chain and 429 handling; HTTP-level retries would burn the daily quota.
 
+// ── OpenRouter dashboard helpers: live :free model list + account/quota snapshot ──
+static void ConfigureOpenRouterClient(IServiceProvider sp, HttpClient client)
+{
+    var opts = sp.GetRequiredService<IOptions<OpenRouterOptions>>().Value;
+    client.BaseAddress = new Uri(opts.BaseUrl.TrimEnd('/') + '/');
+    client.DefaultRequestHeaders.Authorization =
+        new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", opts.ApiKey);
+}
+builder.Services.AddHttpClient<OpenRouterModelsService>(ConfigureOpenRouterClient);
+builder.Services.AddHttpClient<OpenRouterAccountService>(ConfigureOpenRouterClient);
+
 // ── Application services ──────────────────────────────────────────────────────────
 builder.Services.AddSingleton<HtmlSanitizerService>();
+builder.Services.AddScoped<RuntimeSettingsService>();
 builder.Services.AddScoped<TranslationService>();
 builder.Services.AddHostedService<FeedWorker>();
+builder.Services.AddMemoryCache();
+
+// ── Admin auth: cookie-based, credentials in the DB (AdminUser) ──────────────────
+builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
+    .AddCookie(options =>
+    {
+        options.LoginPath = "/admin/login";
+        options.LogoutPath = "/admin/logout";
+        options.AccessDeniedPath = "/admin/login";
+        options.ExpireTimeSpan = TimeSpan.FromDays(7);
+        options.SlidingExpiration = true;
+        options.Cookie.Name = "v2en_admin";
+        options.Cookie.HttpOnly = true;
+        options.Cookie.SameSite = SameSiteMode.Lax;
+    });
+builder.Services.AddAuthorization();
 
 // ── Infrastructure ────────────────────────────────────────────────────────────────
 builder.Services.AddHealthChecks();
-builder.Services.AddRazorPages();
+builder.Services.AddRazorPages(options =>
+{
+    // Everything under /Admin requires login, except the login page itself.
+    options.Conventions.AuthorizeFolder("/Admin");
+    options.Conventions.AllowAnonymousToPage("/Admin/Login");
+});
 
 // ═════════════════════════════════════════════════════════════════════════════════
 var app = builder.Build();
@@ -92,9 +126,10 @@ if (!app.Environment.IsDevelopment())
 
 app.UseStaticFiles();
 app.UseRouting();
+app.UseAuthentication();
 app.UseAuthorization();
 
-// ── Run EF migrations and set WAL mode ───────────────────────────────────────────
+// ── Run EF migrations, set WAL mode, seed runtime settings + initial admin ───────
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -102,6 +137,43 @@ using (var scope = app.Services.CreateScope())
     // journal_mode=WAL persists in the DB file — only needs to be set once ever,
     // but calling it on every startup is idempotent and harmless.
     db.Database.ExecuteSqlRaw("PRAGMA journal_mode=WAL;");
+
+    // Seed the runtime-settings row from appsettings on first run (DB is source of truth after).
+    await scope.ServiceProvider.GetRequiredService<RuntimeSettingsService>().GetAsync();
+
+    // Seed an initial admin account if none exists. Username/password come from config
+    // (Admin:Username / Admin:Password, or env Admin__Username / Admin__Password); if no
+    // password is configured we generate a random one and log it once so you can log in.
+    var startupLog = scope.ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger("Startup");
+    if (!await db.AdminUsers.AnyAsync())
+    {
+        var username = builder.Configuration["Admin:Username"];
+        if (string.IsNullOrWhiteSpace(username)) username = "admin";
+        var password = builder.Configuration["Admin:Password"];
+        var generated = string.IsNullOrWhiteSpace(password);
+        if (generated)
+            password = Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(12));
+
+        db.AdminUsers.Add(new AdminUser
+        {
+            Username = username,
+            PasswordHash = PasswordHasher.Hash(password!),
+            CreatedUtc = DateTimeOffset.UtcNow,
+        });
+        await db.SaveChangesAsync();
+
+        if (generated)
+            startupLog.LogWarning(
+                "\n  ┌──────────────────────────────────────────────────────────────┐\n" +
+                "  │  Seeded admin account — CHANGE THE PASSWORD after first login │\n" +
+                "  │    username: {User}\n" +
+                "  │    password: {Password}\n" +
+                "  │  Set Admin__Username / Admin__Password env vars to control it │\n" +
+                "  └──────────────────────────────────────────────────────────────┘",
+                username, password);
+        else
+            startupLog.LogInformation("Seeded admin account '{User}' from configuration.", username);
+    }
 }
 
 // ── Endpoints ─────────────────────────────────────────────────────────────────────

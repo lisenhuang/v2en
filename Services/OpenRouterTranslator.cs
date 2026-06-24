@@ -1,10 +1,11 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
-using Microsoft.Extensions.Options;
-using v2en.Configuration;
 
 namespace v2en.Services;
+
+/// <summary>One model attempt within a translation call — surfaced to the admin log.</summary>
+public record TranslationAttempt(string Model, int? HttpStatus, string Outcome, string? Detail);
 
 public record TranslationOutcome(
     bool Success,
@@ -12,13 +13,14 @@ public record TranslationOutcome(
     string? ContentHtml,
     string? Model,
     bool RateLimited,
-    string? Error);
+    string? Error,
+    IReadOnlyList<TranslationAttempt> Attempts);
 
 /// <summary>
 /// Typed HttpClient calling OpenRouter's OpenAI-compatible chat/completions endpoint.
-/// Translates ONE post per call (title + the HTML body already in the RSS feed),
-/// using a FREE-models-only fallback chain. On 429 it stops immediately (the limit is
-/// account-wide, so trying another model would just burn quota).
+/// Translates ONE post per call (title + the HTML body already in the RSS feed), using a
+/// FREE-models-only fallback chain supplied by the caller (admin-configured at runtime).
+/// Each model attempt is recorded so the dashboard can show the raw AI API error.
 /// </summary>
 public class OpenRouterTranslator
 {
@@ -32,37 +34,37 @@ public class OpenRouterTranslator
         "Do NOT wrap the JSON in markdown code fences and do NOT add any commentary.";
 
     private readonly HttpClient _http;
-    private readonly OpenRouterOptions _or;
-    private readonly TranslationOptions _t;
     private readonly ILogger<OpenRouterTranslator> _logger;
 
-    public OpenRouterTranslator(
-        HttpClient http,
-        IOptions<OpenRouterOptions> or,
-        IOptions<TranslationOptions> t,
-        ILogger<OpenRouterTranslator> logger)
+    public OpenRouterTranslator(HttpClient http, ILogger<OpenRouterTranslator> logger)
     {
         _http = http;
-        _or = or.Value;
-        _t = t.Value;
         _logger = logger;
     }
 
-    public async Task<TranslationOutcome> TranslateAsync(string titleZh, string contentHtmlZh, CancellationToken ct)
+    public async Task<TranslationOutcome> TranslateAsync(
+        string titleZh,
+        string contentHtmlZh,
+        IReadOnlyList<string> models,
+        int maxOutputTokens,
+        double temperature,
+        CancellationToken ct)
     {
         var userJson = JsonSerializer.Serialize(new { title = titleZh, content = contentHtmlZh });
+        var attempts = new List<TranslationAttempt>();
         string? lastError = null;
         // True once any model gives a non-429 response (a genuine attempt). If every model is
         // 429, the failure is purely transient rate-limiting → the caller should back off and
         // retry later WITHOUT charging an attempt against this post.
         bool sawNon429 = false;
 
-        foreach (var model in _or.Models)
+        foreach (var model in models)
         {
             // Hard guard: free models only, never paid.
             if (!model.EndsWith(":free", StringComparison.OrdinalIgnoreCase))
             {
                 _logger.LogWarning("Skipping non-free model '{Model}' (free-only policy).", model);
+                attempts.Add(new TranslationAttempt(model, null, "skipped_nonfree", "Free-only policy: model id must end with ':free'."));
                 continue;
             }
 
@@ -74,14 +76,15 @@ public class OpenRouterTranslator
                     new { role = "system", content = SystemPrompt },
                     new { role = "user", content = userJson },
                 },
-                temperature = _t.Temperature,
-                max_tokens = _t.MaxOutputTokens,
+                temperature,
+                max_tokens = maxOutputTokens,
                 response_format = new { type = "json_object" },
             };
 
             try
             {
                 using var resp = await _http.PostAsJsonAsync("chat/completions", body, ct);
+                var status = (int)resp.StatusCode;
 
                 if (resp.StatusCode == HttpStatusCode.TooManyRequests)
                 {
@@ -92,11 +95,13 @@ public class OpenRouterTranslator
                     if (IsAccountLevelRateLimit(err))
                     {
                         _logger.LogWarning("OpenRouter account-level 429 (rate/quota): {Body}", Clip(err));
-                        return new TranslationOutcome(false, null, null, model, RateLimited: true, "429 (account rate/quota)");
+                        attempts.Add(new TranslationAttempt(model, status, "429_account", ClipDetail(err)));
+                        return new TranslationOutcome(false, null, null, model, RateLimited: true, "429 (account rate/quota)", attempts);
                     }
 
                     lastError = $"429 (upstream provider throttle) on {model}";
                     _logger.LogWarning("{Error}; trying next model. {Body}", lastError, Clip(err));
+                    attempts.Add(new TranslationAttempt(model, status, "429_upstream", ClipDetail(err)));
                     continue;
                 }
 
@@ -106,8 +111,9 @@ public class OpenRouterTranslator
                 if (!resp.IsSuccessStatusCode)
                 {
                     var err = await SafeReadBodyAsync(resp, ct);
-                    lastError = $"HTTP {(int)resp.StatusCode} from {model}: {Clip(err)}";
+                    lastError = $"HTTP {status} from {model}: {Clip(err)}";
                     _logger.LogWarning("{Error}; trying next model.", lastError);
+                    attempts.Add(new TranslationAttempt(model, status, "http_error", ClipDetail(err)));
                     continue;
                 }
 
@@ -123,20 +129,26 @@ public class OpenRouterTranslator
                     // Post too long for this model's effective output cap — the HTML is likely truncated/broken.
                     lastError = $"Truncated (finish_reason=length) on {model}";
                     _logger.LogWarning("{Error}; trying next model.", lastError);
+                    attempts.Add(new TranslationAttempt(model, status, "truncated", "finish_reason=length — output exceeded max_tokens; raise it or the post is too long."));
                     continue;
                 }
 
                 if (string.IsNullOrWhiteSpace(content))
                 {
                     lastError = $"Empty content from {model}";
+                    attempts.Add(new TranslationAttempt(model, status, "empty", null));
                     continue;
                 }
 
                 if (TryParseTranslation(content, out var title, out var html))
-                    return new TranslationOutcome(true, title, html, model, RateLimited: false, null);
+                {
+                    attempts.Add(new TranslationAttempt(model, status, "ok", null));
+                    return new TranslationOutcome(true, title, html, model, RateLimited: false, null, attempts);
+                }
 
                 lastError = $"Unparseable JSON from {model}";
                 _logger.LogWarning("{Error}; trying next model.", lastError);
+                attempts.Add(new TranslationAttempt(model, status, "unparseable", ClipDetail(content)));
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -148,13 +160,14 @@ public class OpenRouterTranslator
                 sawNon429 = true;
                 lastError = ex.Message;
                 _logger.LogWarning(ex, "OpenRouter call failed on {Model}; trying next model.", model);
+                attempts.Add(new TranslationAttempt(model, null, "exception", ClipDetail(ex.ToString())));
             }
         }
 
         // RateLimited only when every model we tried returned 429 (nothing actually served us):
         // transient, so the caller retries later without burning an attempt.
         return new TranslationOutcome(false, null, null, null, RateLimited: !sawNon429,
-            lastError ?? "No free models configured");
+            lastError ?? "No free models configured", attempts);
     }
 
     private static async Task<string> SafeReadBodyAsync(HttpResponseMessage resp, CancellationToken ct)
@@ -180,6 +193,10 @@ public class OpenRouterTranslator
 
     private static string Clip(string s) =>
         string.IsNullOrEmpty(s) ? "" : (s.Length <= 300 ? s : s[..300]);
+
+    /// <summary>Longer clip for the stored admin log detail (raw AI API error body).</summary>
+    private static string? ClipDetail(string? s) =>
+        string.IsNullOrEmpty(s) ? null : (s.Length <= 4000 ? s : s[..4000] + " …[truncated]");
 
     private static bool TryParseTranslation(string content, out string title, out string html)
     {

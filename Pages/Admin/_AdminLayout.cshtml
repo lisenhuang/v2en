@@ -1,0 +1,61 @@
+@{
+    var currentPage = ViewContext.RouteData.Values["page"] as string ?? "";
+    bool IsActive(string page) => string.Equals(currentPage, page, StringComparison.OrdinalIgnoreCase);
+    var authed = User.Identity?.IsAuthenticated == true;
+}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>@(ViewData["Title"] ?? "Admin") · v2en</title>
+    @* Set theme before paint to avoid a flash of the wrong theme. *@
+    <script>
+        (function () {
+            try { var t = localStorage.getItem('theme'); if (t) document.documentElement.setAttribute('data-theme', t); } catch (e) { }
+        })();
+    </script>
+    <link rel="icon" href="~/favicon.ico" />
+    <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
+    <link rel="stylesheet" href="~/css/admin.css" asp-append-version="true" />
+</head>
+<body class="admin">
+    <header class="admin-topbar">
+        <div class="admin-shell admin-topbar-inner">
+            <a class="admin-brand" asp-page="/Admin/Index">
+                <span class="brand-mark">V2</span>
+                <span>v2en <em>admin</em></span>
+            </a>
+            @if (authed)
+            {
+                <nav class="admin-nav">
+                    <a asp-page="/Admin/Index" class="@(IsActive("/Admin/Index") ? "active" : "")">Overview</a>
+                    <a asp-page="/Admin/Settings" class="@(IsActive("/Admin/Settings") ? "active" : "")">Settings</a>
+                    <a asp-page="/Admin/Logs" class="@(IsActive("/Admin/Logs") ? "active" : "")">Logs</a>
+                    <a asp-page="/Admin/Account" class="@(IsActive("/Admin/Account") ? "active" : "")">Account</a>
+                </nav>
+            }
+            <div class="admin-topbar-right">
+                <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle dark mode" title="Toggle theme">
+                    <span class="theme-icon" aria-hidden="true"></span>
+                </button>
+                @if (authed)
+                {
+                    <form method="post" asp-page="/Admin/Logout" class="inline-form">
+                        <button type="submit" class="btn btn-ghost btn-sm">Sign out</button>
+                    </form>
+                    <a href="/" class="admin-viewsite" title="View public site" target="_blank">View site ↗</a>
+                }
+            </div>
+        </div>
+    </header>
+
+    <main class="admin-shell admin-main">
+        @RenderBody()
+    </main>
+
+    <script src="~/js/site.js" asp-append-version="true"></script>
+    @await RenderSectionAsync("Scripts", required: false)
+</body>
+</html>

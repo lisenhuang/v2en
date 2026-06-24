@@ -1,8 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Options;
-using v2en.Configuration;
 using v2en.Data;
 
 namespace v2en.Services;
@@ -10,14 +8,18 @@ namespace v2en.Services;
 /// <summary>
 /// Scoped orchestrator: fetch the feed (conditional GET), upsert posts by V2exId,
 /// then translate a paced batch of pending posts. Created fresh per worker tick.
+/// Pacing/quota/model config is read from <see cref="RuntimeSettings"/> (admin-editable).
 /// </summary>
 public class TranslationService
 {
+    /// <summary>Drop dashboard log rows older than this to keep the table bounded.</summary>
+    private static readonly TimeSpan LogRetention = TimeSpan.FromDays(14);
+
     private readonly AppDbContext _db;
     private readonly V2exFeedClient _feed;
     private readonly OpenRouterTranslator _translator;
     private readonly HtmlSanitizerService _sanitizer;
-    private readonly TranslationOptions _t;
+    private readonly RuntimeSettingsService _settings;
     private readonly ILogger<TranslationService> _logger;
 
     public TranslationService(
@@ -25,14 +27,14 @@ public class TranslationService
         V2exFeedClient feed,
         OpenRouterTranslator translator,
         HtmlSanitizerService sanitizer,
-        IOptions<TranslationOptions> t,
+        RuntimeSettingsService settings,
         ILogger<TranslationService> logger)
     {
         _db = db;
         _feed = feed;
         _translator = translator;
         _sanitizer = sanitizer;
-        _t = t.Value;
+        _settings = settings;
         _logger = logger;
     }
 
@@ -121,7 +123,12 @@ public class TranslationService
 
     private async Task TranslatePendingAsync(FeedState state, CancellationToken ct)
     {
+        var cfg = await _settings.GetAsync(ct);
+        var models = RuntimeSettingsService.ParseModels(cfg);
         var now = DateTimeOffset.UtcNow;
+
+        // Bound the dashboard log table.
+        await _db.TranslationLogs.Where(l => l.Utc < now - LogRetention).ExecuteDeleteAsync(ct);
 
         // Roll the daily quota window at UTC midnight.
         if (state.QuotaWindowResetUtc is null || now >= state.QuotaWindowResetUtc)
@@ -130,18 +137,29 @@ public class TranslationService
             state.QuotaWindowResetUtc = new DateTimeOffset(now.UtcDateTime.Date.AddDays(1), TimeSpan.Zero);
         }
 
-        var remainingDaily = _t.DailyQuota - state.TranslationsToday;
-        if (remainingDaily <= 0)
+        if (models.Count == 0)
         {
-            _logger.LogWarning("Daily translation quota reached ({Quota}); resumes after {Reset:u}.",
-                _t.DailyQuota, state.QuotaWindowResetUtc);
+            _logger.LogWarning("No translation models configured; skipping translation.");
+            Log(LogSeverity.Error, "no_models", "No AI models configured — set at least one :free model in the dashboard.");
             await _db.SaveChangesAsync(ct);
             return;
         }
 
-        var take = Math.Min(_t.MaxPerTick, remainingDaily);
+        var remainingDaily = cfg.DailyQuota - state.TranslationsToday;
+        if (!cfg.UnlimitedDaily && remainingDaily <= 0)
+        {
+            _logger.LogWarning("Daily translation quota reached ({Quota}); resumes after {Reset:u}.",
+                cfg.DailyQuota, state.QuotaWindowResetUtc);
+            Log(LogSeverity.Warning, "quota_reached",
+                $"Daily quota of {cfg.DailyQuota} reached; resumes after {state.QuotaWindowResetUtc:u}. Raise DailyQuota or enable Unlimited to translate more.");
+            await _db.SaveChangesAsync(ct);
+            return;
+        }
+
+        // Unlimited mode: only OpenRouter's own free-tier limit (an account-level 429) stops us.
+        var take = cfg.UnlimitedDaily ? cfg.MaxPerTick : Math.Min(cfg.MaxPerTick, remainingDaily);
         var pending = await _db.Posts
-            .Where(p => p.Status == TranslationStatus.Pending && p.Attempts < _t.MaxAttempts)
+            .Where(p => p.Status == TranslationStatus.Pending && p.Attempts < cfg.MaxAttempts)
             .OrderByDescending(p => p.Published) // freshest first
             .Take(take)
             .ToListAsync(ct);
@@ -153,20 +171,26 @@ public class TranslationService
         }
 
         _logger.LogInformation("Translating {Count} post(s) this tick (daily {Used}/{Quota}).",
-            pending.Count, state.TranslationsToday, _t.DailyQuota);
+            pending.Count, state.TranslationsToday, cfg.DailyQuota);
 
         for (int i = 0; i < pending.Count; i++)
         {
             // Pace calls so we never hammer the free API.
             if (i > 0)
-                await Task.Delay(TimeSpan.FromSeconds(_t.MinDelaySecondsBetweenCalls), ct);
+                await Task.Delay(TimeSpan.FromSeconds(cfg.MinDelaySecondsBetweenCalls), ct);
 
             var post = pending[i];
-            var outcome = await _translator.TranslateAsync(post.TitleZh, post.ContentZhHtml, ct);
+            var outcome = await _translator.TranslateAsync(
+                post.TitleZh, post.ContentZhHtml, models, cfg.MaxOutputTokens, cfg.Temperature, ct);
 
             if (outcome.RateLimited)
             {
                 _logger.LogWarning("Rate-limited by OpenRouter; stopping translation for this tick.");
+                Log(LogSeverity.Warning, "rate_limited",
+                    "OpenRouter rate-limited the account; paused translation for this tick.",
+                    v2exId: post.V2exId, model: outcome.Model, httpStatus: 429,
+                    detail: FormatAttempts(outcome.Attempts));
+                await _db.SaveChangesAsync(ct);
                 break; // leave remaining posts Pending, no attempt charged
             }
 
@@ -181,14 +205,27 @@ public class TranslationService
                 post.TranslationModel = outcome.Model;
                 post.TranslatedAt = DateTimeOffset.UtcNow;
                 post.LastError = null;
+                Log(LogSeverity.Info, "translated", $"Translated \"{Trim(post.TitleEn, 80)}\".",
+                    v2exId: post.V2exId, model: outcome.Model);
             }
             else
             {
                 post.LastError = outcome.Error;
-                if (post.Attempts >= _t.MaxAttempts)
+                var exhausted = post.Attempts >= cfg.MaxAttempts;
+                if (exhausted)
                     post.Status = TranslationStatus.Failed;
+
                 _logger.LogWarning("Translation failed for post {Id} (attempt {Attempt}): {Error}",
                     post.V2exId, post.Attempts, outcome.Error);
+                Log(exhausted ? LogSeverity.Error : LogSeverity.Warning,
+                    exhausted ? "post_failed" : "model_failed",
+                    exhausted
+                        ? $"Post {post.V2exId} failed after {post.Attempts} attempt(s): {outcome.Error}"
+                        : $"Attempt {post.Attempts} on post {post.V2exId} failed: {outcome.Error}",
+                    v2exId: post.V2exId,
+                    model: outcome.Attempts.LastOrDefault()?.Model,
+                    httpStatus: outcome.Attempts.LastOrDefault()?.HttpStatus,
+                    detail: FormatAttempts(outcome.Attempts));
             }
 
             await _db.SaveChangesAsync(ct);
@@ -196,6 +233,35 @@ public class TranslationService
 
         await _db.SaveChangesAsync(ct);
     }
+
+    private void Log(LogSeverity level, string evt, string message,
+        long? v2exId = null, string? model = null, int? httpStatus = null, string? detail = null)
+    {
+        _db.TranslationLogs.Add(new TranslationLog
+        {
+            Utc = DateTimeOffset.UtcNow,
+            Level = level,
+            Event = evt,
+            Message = message,
+            V2exId = v2exId,
+            Model = model,
+            HttpStatus = httpStatus,
+            Detail = detail,
+        });
+    }
+
+    /// <summary>Flatten the per-model attempt list into a readable block for the log detail.</summary>
+    private static string FormatAttempts(IReadOnlyList<TranslationAttempt> attempts)
+    {
+        if (attempts.Count == 0) return "(no attempts)";
+        return string.Join("\n\n", attempts.Select(a =>
+        {
+            var head = $"[{a.Model}] {a.Outcome}" + (a.HttpStatus is int s ? $" (HTTP {s})" : "");
+            return string.IsNullOrEmpty(a.Detail) ? head : head + "\n" + a.Detail;
+        }));
+    }
+
+    private static string Trim(string s, int max) => s.Length <= max ? s : s[..max] + "…";
 
     private static string Hash(string title, string content)
     {

@@ -1,0 +1,59 @@
+@page
+@model v2en.Pages.Admin.AccountModel
+@{
+    ViewData["Title"] = "Account";
+}
+
+<h1>Account</h1>
+<p class="page-sub">Your admin login. Credentials are stored (hashed) in the database.</p>
+
+@if (Model.Saved)
+{
+    <div class="alert ok">Password changed.</div>
+}
+@if (Model.Error is not null)
+{
+    <div class="alert err">@Model.Error</div>
+}
+
+<div class="card">
+    <h2>Profile</h2>
+    <table class="table">
+        <tbody>
+            <tr><th style="width:160px">Username</th><td class="mono">@Model.CurrentUser?.Username</td></tr>
+            <tr>
+                <th>Last login</th>
+                <td>
+                    @if (Model.CurrentUser?.LastLoginUtc is not null)
+                    {
+                        <time datetime="@Model.CurrentUser.LastLoginUtc.Value.ToString("o")">@Model.CurrentUser.LastLoginUtc.Value.ToString("u")</time>
+                    }
+                    else
+                    {
+                        <span class="muted">—</span>
+                    }
+                </td>
+            </tr>
+        </tbody>
+    </table>
+</div>
+
+<div class="card">
+    <h2>Change password</h2>
+    <form method="post" style="max-width:420px">
+        <div class="field">
+            <label asp-for="Current">Current password</label>
+            <input type="password" asp-for="Current" autocomplete="current-password" />
+        </div>
+        <div class="field">
+            <label asp-for="NewPassword">New password</label>
+            <p class="hint">At least 8 characters.</p>
+            <input type="password" asp-for="NewPassword" autocomplete="new-password" />
+        </div>
+        <div class="field">
+            <label asp-for="Confirm">Confirm new password</label>
+            <input type="password" asp-for="Confirm" autocomplete="new-password" />
+        </div>
+        <button type="submit" class="btn btn-primary">Update password</button>
+    </form>
+</div>

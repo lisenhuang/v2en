@@ -3,12 +3,15 @@ services:
     build: .
     restart: unless-stopped
     ports:
-      - "8080:8080"
+      - "8236:8236"
     volumes:
       - v2en-data:/data
     environment:
       - OpenRouter__ApiKey=${OPENROUTER_API_KEY:?OpenRouter API key is required}
-      - Site__BaseUrl=${SITE_BASE_URL:-http://localhost:8080}
+      - Site__BaseUrl=${SITE_BASE_URL:-http://localhost:8236}
+      # Optional admin login seed (else a random password is generated and logged once):
+      # - Admin__Username=admin
+      # - Admin__Password=change-me
 
 volumes:
   v2en-data:
