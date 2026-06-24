@@ -20,9 +20,12 @@ public class IndexModel : PageModel
     public int PendingCount { get; private set; }
     public DateTimeOffset? LastFetchUtc { get; private set; }
 
-    public async Task OnGetAsync(int page = 1)
+    // NOTE: the parameter is `p`, not `page`. In Razor Pages `page` is a reserved
+    // route-value name (it identifies the page path), so a `?page=N` query never
+    // binds to a handler parameter named `page` — pagination silently breaks.
+    public async Task OnGetAsync(int p = 1)
     {
-        CurrentPage = Math.Max(1, page);
+        CurrentPage = Math.Max(1, p);
 
         TotalCount = await _db.Posts.CountAsync();
         TranslatedCount = await _db.Posts.CountAsync(p => p.Status == TranslationStatus.Translated);
