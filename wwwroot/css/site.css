@@ -138,8 +138,9 @@ main.container { flex: 1 0 auto; padding-top: 24px; padding-bottom: 48px; }
 .post-card-link { display: block; color: inherit; }
 .post-card-link:hover { text-decoration: none; }
 
-.post-title { margin: 0 0 6px; font-size: 1.12rem; font-weight: 700; line-height: 1.35; color: var(--text); }
-.post-preview { margin: 0; color: var(--text-muted); font-size: .92rem; }
+/* Break long unbreakable tokens (URLs, base64) so previews never overflow the card. */
+.post-title { margin: 0 0 6px; font-size: 1.12rem; font-weight: 700; line-height: 1.35; color: var(--text); overflow-wrap: anywhere; }
+.post-preview { margin: 0; color: var(--text-muted); font-size: .92rem; overflow-wrap: anywhere; }
 
 .post-meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; color: var(--text-muted); font-size: .82rem; margin-top: 10px; }
 .post-meta .author { font-weight: 600; color: var(--text); }
