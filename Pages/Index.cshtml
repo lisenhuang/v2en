@@ -54,7 +54,7 @@ else
     <nav class="pager">
         @if (Model.CurrentPage > 1)
         {
-            <a class="pager-btn" href="/?page=@(Model.CurrentPage - 1)">← Newer</a>
+            <a class="pager-btn" href="/?p=@(Model.CurrentPage - 1)">← Newer</a>
         }
         else
         {
@@ -63,7 +63,7 @@ else
         <span class="pager-page">Page @Model.CurrentPage</span>
         @if (Model.HasNext)
         {
-            <a class="pager-btn" href="/?page=@(Model.CurrentPage + 1)">Older →</a>
+            <a class="pager-btn" href="/?p=@(Model.CurrentPage + 1)">Older →</a>
         }
         else
         {
