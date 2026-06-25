@@ -294,6 +294,45 @@ main.container { flex: 1 0 auto; padding-top: 24px; padding-bottom: 48px; }
 .ask-send:disabled { opacity: .5; cursor: default; }
 .ask-foot { text-align: center; color: var(--text-muted); font-size: .8rem; margin: 14px 0 0; }
 
+/* ---------- Live voice page ---------- */
+.live-status {
+    font-size: .8rem; font-weight: 600; padding: 4px 11px; border-radius: 999px;
+    border: 1px solid var(--border); color: var(--text-muted); white-space: nowrap;
+}
+.live-status[data-state="connecting"] { color: #b45309; border-color: color-mix(in srgb, #b45309 40%, var(--border)); }
+.live-status[data-state="listening"] { color: #16a34a; border-color: color-mix(in srgb, #16a34a 45%, var(--border)); }
+.live-status[data-state="speaking"] { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 50%, var(--border)); }
+.live-status[data-state="error"] { color: #dc2626; border-color: color-mix(in srgb, #dc2626 45%, var(--border)); }
+
+.live-stage {
+    flex: 1; min-height: 240px; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 20px; padding: 34px 18px;
+}
+.live-mic {
+    position: relative; width: 100px; height: 100px; border-radius: 50%; border: none;
+    cursor: pointer; background: var(--accent); color: #fff; display: grid; place-items: center;
+    box-shadow: 0 8px 24px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.live-mic:hover { filter: brightness(1.06); }
+.live-mic.is-live { background: #dc2626; box-shadow: 0 8px 24px color-mix(in srgb, #dc2626 35%, transparent); }
+.live-mic-icon { font-size: 2.3rem; line-height: 1; }
+.live-mic-ring { position: absolute; inset: -3px; border-radius: 50%; border: 3px solid #dc2626; opacity: 0; }
+.live-mic.is-live .live-mic-ring { animation: livepulse 1.5s ease-out infinite; }
+@keyframes livepulse { 0% { transform: scale(1); opacity: .55; } 100% { transform: scale(1.65); opacity: 0; } }
+.live-caption { color: var(--text-muted); font-size: .92rem; margin: 0; text-align: center; max-width: 32ch; }
+
+.live-log {
+    border-top: 1px solid var(--border); padding: 14px 18px; max-height: 32vh; overflow-y: auto;
+    display: flex; flex-direction: column; gap: 10px;
+}
+.live-log:empty { display: none; }
+.live-log-line { font-size: .92rem; line-height: 1.55; word-wrap: break-word; overflow-wrap: anywhere; }
+.live-log-who {
+    display: inline-block; font-size: .68rem; text-transform: uppercase; letter-spacing: .05em;
+    font-weight: 700; color: var(--text-muted); margin-right: 8px;
+}
+.live-you .live-log-who { color: var(--accent); }
+
 /* nav link */
 .nav-link { color: var(--text-muted); font-weight: 500; }
 .nav-link:hover { color: var(--text); }
@@ -320,4 +359,8 @@ main.container { flex: 1 0 auto; padding-top: 24px; padding-bottom: 48px; }
     .ask-composer textarea { min-height: 44px; padding: 11px 13px; }
     .ask-send { padding: 11px 16px; }
     .ask-disabled { margin: 24px 16px; }
+
+    /* Live page: mic stage fills the screen, transcript caps to the lower third. */
+    .live-stage { flex: 1; min-height: 0; }
+    .live-log { max-height: 36vh; }
 }

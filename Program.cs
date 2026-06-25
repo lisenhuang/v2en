@@ -359,6 +359,7 @@ app.MapPost("/api/chat/models", async (
     return Results.Ok(new
     {
         models = lists.Chat.Select(m => new { id = m.Id, displayName = m.DisplayName }),
+        live = lists.Live.Select(m => new { id = m.Id, displayName = m.DisplayName }),
         @default = cfg.ChatModel,
     });
 });

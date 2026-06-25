@@ -9,14 +9,19 @@ public record GeminiModel(string Id, string DisplayName, IReadOnlyList<string> M
 {
     public bool SupportsEmbedding => Methods.Any(m => m.Equals("embedContent", StringComparison.OrdinalIgnoreCase));
     public bool SupportsGenerate => Methods.Any(m => m.Equals("generateContent", StringComparison.OrdinalIgnoreCase));
+    // Live / real-time audio models expose the bidirectional streaming method.
+    public bool SupportsLive => Methods.Any(m => m.Equals("bidiGenerateContent", StringComparison.OrdinalIgnoreCase));
 }
 
-public record GeminiModelLists(IReadOnlyList<GeminiModel> Embedding, IReadOnlyList<GeminiModel> Chat);
+public record GeminiModelLists(
+    IReadOnlyList<GeminiModel> Embedding,
+    IReadOnlyList<GeminiModel> Chat,
+    IReadOnlyList<GeminiModel> Live);
 
 /// <summary>
-/// Lists models live from the Gemini API (GET /v1beta/models) using a server-side key, split into
-/// embedding-capable and generation-capable lists for the admin dropdowns. Cached briefly so the
-/// settings page can be opened repeatedly. Models are never hardcoded.
+/// Lists models live from the Gemini API (GET /v1beta/models), split into embedding-,
+/// generation-, and live (bidi/real-time-audio)-capable lists for the dropdowns. Cached briefly
+/// (per key) so a page can be opened repeatedly. Models are never hardcoded.
 /// </summary>
 public class GeminiModelsService
 {
@@ -36,7 +41,7 @@ public class GeminiModelsService
     public async Task<GeminiModelLists> GetModelsAsync(string? apiKey, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(apiKey))
-            return new GeminiModelLists(Array.Empty<GeminiModel>(), Array.Empty<GeminiModel>());
+            return new GeminiModelLists(Array.Empty<GeminiModel>(), Array.Empty<GeminiModel>(), Array.Empty<GeminiModel>());
 
         // Cache per-key, not globally: different keys may have access to different models, and this
         // method is now also called with each PUBLIC visitor's own key (chat model picker), so one
@@ -47,7 +52,7 @@ public class GeminiModelsService
             return cached;
 
         var lists = await FetchAsync(apiKey, ct);
-        if (lists.Embedding.Count > 0 || lists.Chat.Count > 0)
+        if (lists.Embedding.Count > 0 || lists.Chat.Count > 0 || lists.Live.Count > 0)
             _cache.Set(cacheKey, lists, CacheTtl);
         return lists;
     }
@@ -90,12 +95,13 @@ public class GeminiModelsService
 
             return new GeminiModelLists(
                 Embedding: all.Where(m => m.SupportsEmbedding).OrderBy(m => m.Id).ToList(),
-                Chat: all.Where(m => m.SupportsGenerate).OrderBy(m => m.Id).ToList());
+                Chat: all.Where(m => m.SupportsGenerate).OrderBy(m => m.Id).ToList(),
+                Live: all.Where(m => m.SupportsLive).OrderBy(m => m.Id).ToList());
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to fetch Gemini model list.");
-            return new GeminiModelLists(Array.Empty<GeminiModel>(), Array.Empty<GeminiModel>());
+            return new GeminiModelLists(Array.Empty<GeminiModel>(), Array.Empty<GeminiModel>(), Array.Empty<GeminiModel>());
         }
     }
 }
