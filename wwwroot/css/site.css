@@ -210,6 +210,8 @@ main.container { flex: 1 0 auto; padding-top: 24px; padding-bottom: 48px; }
 }
 .ask-key { flex: 1; min-width: 140px; padding: 7px 10px; }
 .ask-win { padding: 7px 8px; }
+.ask-model { padding: 7px 8px; max-width: 180px; }
+.ask-model:disabled { opacity: .6; cursor: not-allowed; }
 .ask-save { display: inline-flex; align-items: center; gap: 5px; font-size: .82rem; color: var(--text-muted); white-space: nowrap; }
 .ask-save input { width: 15px; height: 15px; accent-color: var(--accent); }
 .ask-key-pill {

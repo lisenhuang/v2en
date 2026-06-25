@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Caching.Memory;
 
@@ -18,7 +20,6 @@ public record GeminiModelLists(IReadOnlyList<GeminiModel> Embedding, IReadOnlyLi
 /// </summary>
 public class GeminiModelsService
 {
-    private const string CacheKey = "gemini_models";
     private static readonly TimeSpan CacheTtl = TimeSpan.FromMinutes(10);
 
     private readonly HttpClient _http;
@@ -37,13 +38,24 @@ public class GeminiModelsService
         if (string.IsNullOrWhiteSpace(apiKey))
             return new GeminiModelLists(Array.Empty<GeminiModel>(), Array.Empty<GeminiModel>());
 
-        if (_cache.TryGetValue(CacheKey, out GeminiModelLists? cached) && cached is not null)
+        // Cache per-key, not globally: different keys may have access to different models, and this
+        // method is now also called with each PUBLIC visitor's own key (chat model picker), so one
+        // visitor's list must never be served to another. The key itself is never used as the cache
+        // key — only a short hash of it.
+        var cacheKey = CacheKeyFor(apiKey);
+        if (_cache.TryGetValue(cacheKey, out GeminiModelLists? cached) && cached is not null)
             return cached;
 
         var lists = await FetchAsync(apiKey, ct);
         if (lists.Embedding.Count > 0 || lists.Chat.Count > 0)
-            _cache.Set(CacheKey, lists, CacheTtl);
+            _cache.Set(cacheKey, lists, CacheTtl);
         return lists;
+    }
+
+    private static string CacheKeyFor(string apiKey)
+    {
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(apiKey));
+        return "gemini_models:" + Convert.ToHexString(hash, 0, 8);
     }
 
     private async Task<GeminiModelLists> FetchAsync(string apiKey, CancellationToken ct)
