@@ -10,10 +10,13 @@
     var keyPill = document.getElementById("ask-key-pill");
     var remember = document.getElementById("ask-remember");
     var windowEl = document.getElementById("ask-window");
+    var modelEl = document.getElementById("ask-model");
     var thread = document.getElementById("ask-thread");
     var empty = document.getElementById("ask-empty");
     var sendBtn = document.getElementById("ask-send");
     var KEY_LS = "v2en_gemini_key";
+    var WIN_LS = "v2en_ask_window";
+    var MODEL_LS = "v2en_gemini_model";
 
     function collapseKey() { keyWrap.hidden = true; keyPill.hidden = false; }
     function expandKey() { keyWrap.hidden = false; keyPill.hidden = true; keyEl.focus(); }
@@ -32,7 +35,61 @@
         } catch (e) { }
     }
     remember.addEventListener("change", persistKey);
-    keyEl.addEventListener("change", persistKey);
+
+    // Remember the time-window choice across reloads (defaults to the HTML-selected option otherwise).
+    try {
+        var savedWin = localStorage.getItem(WIN_LS);
+        if (savedWin) windowEl.value = savedWin;
+    } catch (e) { }
+    windowEl.addEventListener("change", function () {
+        try { localStorage.setItem(WIN_LS, windowEl.value); } catch (e) { }
+    });
+
+    // ── Chat model picker: load the visitor's own generation models from their key (never hardcoded) ──
+    var savedModel = "";
+    try { savedModel = localStorage.getItem(MODEL_LS) || ""; } catch (e) { }
+    var modelsLoadedFor = null;
+
+    function persistModel() { try { localStorage.setItem(MODEL_LS, modelEl.value); } catch (e) { } }
+    modelEl.addEventListener("change", persistModel);
+
+    function setModelOptions(models) {
+        var want = modelEl.value || savedModel;
+        modelEl.innerHTML = "";
+        var def = document.createElement("option");
+        def.value = ""; def.textContent = "Default model";
+        modelEl.appendChild(def);
+        models.forEach(function (m) {
+            var o = document.createElement("option");
+            o.value = m.id; o.textContent = m.displayName || m.id;
+            modelEl.appendChild(o);
+        });
+        // Restore the previously chosen model if the key still grants it.
+        if (want && models.some(function (m) { return m.id === want; })) modelEl.value = want;
+        modelEl.disabled = false;
+        modelEl.title = "Chat model";
+    }
+
+    function loadModels() {
+        var key = keyEl.value.trim();
+        if (!key || key === modelsLoadedFor) return;
+        fetch("/api/chat/models", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ apiKey: key })
+        }).then(function (r) {
+            return r.ok ? r.json() : null;
+        }).then(function (data) {
+            if (data && data.models && data.models.length) {
+                modelsLoadedFor = key;
+                setModelOptions(data.models);
+            }
+        }).catch(function () { });
+    }
+
+    // Persist the key AND (re)load that key's available models whenever it changes.
+    keyEl.addEventListener("change", function () { persistKey(); loadModels(); });
+    if (keyEl.value.trim()) loadModels();
 
     document.querySelectorAll(".ask-chip").forEach(function (c) {
         c.addEventListener("click", function () {
@@ -112,7 +169,7 @@
         fetch("/api/chat", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ question: q, apiKey: key, window: windowEl.value })
+            body: JSON.stringify({ question: q, apiKey: key, window: windowEl.value, model: modelEl.value || null })
         }).then(function (r) {
             return r.json().catch(function () { return {}; }).then(function (data) {
                 return { ok: r.ok, status: r.status, data: data };

@@ -298,7 +298,9 @@ app.MapPost("/api/chat", async (
         return Results.Ok(new { answer = "I couldn't find any matching posts in that time window yet.", sources = Array.Empty<object>() });
 
     var contextPosts = search.Hits.Take(Math.Max(1, cfg.ChatMaxContextPosts)).ToList();
-    var result = await chat.AnswerAsync(question, req.ApiKey!, cfg.ChatModel, contextPosts, ct);
+    // Visitor-chosen chat model when supplied & well-formed, else the dashboard default.
+    var chatModel = SanitizeModelId(req.Model) ?? cfg.ChatModel;
+    var result = await chat.AnswerAsync(question, req.ApiKey!, chatModel, contextPosts, ct);
 
     // Dashboard log — NEVER the visitor's key.
     db.TranslationLogs.Add(new TranslationLog
@@ -306,7 +308,7 @@ app.MapPost("/api/chat", async (
         Utc = DateTimeOffset.UtcNow,
         Level = result.Success ? LogSeverity.Info : LogSeverity.Warning,
         Event = result.Success ? "chat" : "chat_failed",
-        Model = cfg.ChatModel,
+        Model = chatModel,
         HttpStatus = result.HttpStatus,
         Message = result.Success
             ? $"Answered a question ({contextPosts.Count} source(s), {window})."
@@ -325,6 +327,39 @@ app.MapPost("/api/chat", async (
     {
         answer = result.Answer,
         sources = result.Sources.Select(x => new { id = x.V2exId, title = x.Title, url = x.Url, published = x.Published }),
+    });
+});
+
+// ── Chat model picker: list the visitor's OWN generation-capable Gemini models (never hardcoded) ──
+app.MapPost("/api/chat/models", async (
+    ChatModelsRequest req,
+    RuntimeSettingsService settingsSvc,
+    GeminiModelsService models,
+    IMemoryCache cache,
+    HttpContext ctx,
+    CancellationToken ct) =>
+{
+    var cfg = await settingsSvc.GetAsync(ct);
+    if (!cfg.EnableChat) return Results.NotFound();
+    if (string.IsNullOrWhiteSpace(req.ApiKey))
+        return Results.BadRequest(new { error = "Add your Google AI Studio key to load models." });
+
+    // Light per-IP fixed-window limit — the lookup hits Google and is cached, but guard abuse.
+    var ip = ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+    var bucket = $"models_rl:{ip}:{DateTimeOffset.UtcNow:yyyyMMddHHmm}";
+    var used = cache.Get<int>(bucket);
+    if (used >= 20)
+        return Results.Json(new { error = "Too many requests — wait a minute and try again." }, statusCode: 429);
+    cache.Set(bucket, used + 1, TimeSpan.FromMinutes(1));
+
+    var lists = await models.GetModelsAsync(req.ApiKey, ct);
+    if (lists.Chat.Count == 0)
+        return Results.Json(new { error = "Couldn't load models — check your key." }, statusCode: 502);
+
+    return Results.Ok(new
+    {
+        models = lists.Chat.Select(m => new { id = m.Id, displayName = m.DisplayName }),
+        @default = cfg.ChatModel,
     });
 });
 
@@ -348,5 +383,21 @@ static bool LooksPredominantlyCjk(string s)
     return letters > 0 && cjk * 2 >= letters;
 }
 
-/// <summary>Public chat request body. ApiKey is the visitor's own Gemini key — used once, never stored.</summary>
-record ChatRequest(string? Question, string? ApiKey, string? Window);
+// A visitor-supplied model id is interpolated into the Gemini request path, so accept only a safe
+// model-id shape (letters, digits, dot, hyphen). Anything else (or empty) → null, and the caller
+// falls back to the dashboard's configured chat model. Prevents path/URL injection.
+static string? SanitizeModelId(string? model)
+{
+    var m = model?.Trim();
+    if (string.IsNullOrEmpty(m)) return null;
+    foreach (var ch in m)
+        if (!(char.IsAsciiLetterOrDigit(ch) || ch is '.' or '-' or '_')) return null;
+    return m;
+}
+
+/// <summary>Public chat request body. ApiKey is the visitor's own Gemini key — used once, never stored.
+/// Model is the visitor-chosen chat model (optional; falls back to the dashboard default).</summary>
+record ChatRequest(string? Question, string? ApiKey, string? Window, string? Model);
+
+/// <summary>Body for the public chat model-picker lookup: the visitor's own Gemini key.</summary>
+record ChatModelsRequest(string? ApiKey);
