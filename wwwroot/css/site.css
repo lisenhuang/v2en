@@ -197,9 +197,26 @@ main.container { flex: 1 0 auto; padding-top: 24px; padding-bottom: 48px; }
 }
 .ask-disabled { padding: 40px; text-align: center; color: var(--text-muted); }
 
-/* compact control bar (key + time range) */
-.ask-bar { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
-.ask-key-wrap { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 200px; }
+/* compact toolbar: settings button (key + model) on the left, time range on the right */
+.ask-toolbar { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-bottom: 1px solid var(--border); }
+.ask-toolbar-spacer { flex: 1; }
+.ask-settings-btn {
+    display: inline-flex; align-items: center; gap: 7px; cursor: pointer;
+    padding: 7px 12px; border-radius: 9px; border: 1px solid var(--border);
+    background: var(--bg-elev); color: var(--text); font-size: .86rem; font-family: inherit;
+}
+.ask-settings-btn:hover { border-color: var(--accent); }
+.ask-settings-btn.is-open { border-color: var(--accent); color: var(--accent); }
+.ask-gear { font-size: 1rem; line-height: 1; }
+.ask-key-dot {
+    width: 8px; height: 8px; border-radius: 50%; background: var(--text-muted); opacity: .5;
+}
+.ask-key-dot.is-set { background: #16a34a; opacity: 1; }
+
+/* slide-down settings panel */
+.ask-settings { padding: 14px; border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--bg-elev) 45%, var(--card)); }
+.ask-field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+.ask-field > label:first-child { font-size: .8rem; font-weight: 600; color: var(--text-muted); }
 .ask-card input[type="password"], .ask-card select, .ask-card textarea {
     border-radius: 9px; border: 1px solid var(--border);
     background: var(--bg); color: var(--text); font-size: .92rem; font-family: inherit;
@@ -208,19 +225,13 @@ main.container { flex: 1 0 auto; padding-top: 24px; padding-bottom: 48px; }
     outline: none; border-color: var(--accent);
     box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
 }
-.ask-key { flex: 1; min-width: 140px; padding: 7px 10px; }
+.ask-key { width: 100%; padding: 9px 11px; }
 .ask-win { padding: 7px 8px; }
-.ask-model { padding: 7px 8px; max-width: 180px; }
+.ask-model { width: 100%; padding: 9px 11px; }
 .ask-model:disabled { opacity: .6; cursor: not-allowed; }
-.ask-save { display: inline-flex; align-items: center; gap: 5px; font-size: .82rem; color: var(--text-muted); white-space: nowrap; }
+.ask-save { display: inline-flex; align-items: center; gap: 6px; font-size: .82rem; color: var(--text-muted); }
 .ask-save input { width: 15px; height: 15px; accent-color: var(--accent); }
-.ask-key-pill {
-    flex: 1; min-width: 160px; text-align: left; cursor: pointer;
-    padding: 7px 12px; border-radius: 9px; border: 1px dashed var(--border);
-    background: var(--bg-elev); color: var(--text-muted); font-size: .86rem; font-family: inherit;
-}
-.ask-key-pill:hover { border-color: var(--accent); color: var(--text); }
-.ask-bar-hint { font-size: .78rem; color: var(--text-muted); margin: 0; padding: 7px 14px 0; }
+.ask-bar-hint { font-size: .78rem; color: var(--text-muted); margin: 0; }
 .ask-flash { animation: askflash .6s ease 2; }
 @keyframes askflash { 50% { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 30%, transparent); } }
 
@@ -293,4 +304,20 @@ main.container { flex: 1 0 auto; padding-top: 24px; padding-bottom: 48px; }
     .post-detail-title { font-size: 1.4rem; }
     .brand-text { font-size: 1rem; }
     .ask-bubble { max-width: 92%; }
+
+    /* Ask page becomes a full-screen chat app: no surrounding box, fills the viewport,
+       thread scrolls internally, composer pinned to the bottom. */
+    main.container:has(.ask-app) { padding: 0; height: calc(100dvh - 61px); overflow: hidden; }
+    body:has(.ask-app) .site-footer { display: none; }
+    .ask-app { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+    .ask-intro, .ask-foot { display: none; }
+    .ask-card {
+        flex: 1; min-height: 0;
+        border: none; border-radius: 0; box-shadow: none; background: var(--card);
+    }
+    .ask-thread { flex: 1; min-height: 0; max-height: none; padding: 14px; }
+    .ask-composer { padding: 10px 12px; gap: 8px; }
+    .ask-composer textarea { min-height: 44px; padding: 11px 13px; }
+    .ask-send { padding: 11px 16px; }
+    .ask-disabled { margin: 24px 16px; }
 }
