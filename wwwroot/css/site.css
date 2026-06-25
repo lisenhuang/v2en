@@ -301,6 +301,7 @@ main.container { flex: 1 0 auto; padding-top: 24px; padding-bottom: 48px; }
 }
 .live-status[data-state="connecting"] { color: #b45309; border-color: color-mix(in srgb, #b45309 40%, var(--border)); }
 .live-status[data-state="listening"] { color: #16a34a; border-color: color-mix(in srgb, #16a34a 45%, var(--border)); }
+.live-status[data-state="searching"] { color: #7c3aed; border-color: color-mix(in srgb, #7c3aed 45%, var(--border)); }
 .live-status[data-state="speaking"] { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 50%, var(--border)); }
 .live-status[data-state="error"] { color: #dc2626; border-color: color-mix(in srgb, #dc2626 45%, var(--border)); }
 

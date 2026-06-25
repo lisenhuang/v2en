@@ -364,6 +364,50 @@ app.MapPost("/api/chat/models", async (
     });
 });
 
+// ── Live voice grounding: retrieve posts for a tool-call from the /live session ──
+// The live audio session runs entirely in the browser; when Gemini calls the search_v2ex_posts
+// function it hits this endpoint, which runs the SAME embedding + vector search as /api/chat and
+// returns matching posts as text for the model to answer from. Query embedding uses the visitor's
+// own key (same as the text chat).
+app.MapPost("/api/live/search", async (
+    LiveSearchRequest req,
+    RuntimeSettingsService settingsSvc,
+    RetrievalService retrieval,
+    IMemoryCache cache,
+    HttpContext ctx,
+    CancellationToken ct) =>
+{
+    var cfg = await settingsSvc.GetAsync(ct);
+    if (!cfg.EnableChat) return Results.NotFound();
+
+    var question = (req.Question ?? "").Trim();
+    if (question.Length == 0) return Results.Ok(new { posts = Array.Empty<object>() });
+    if (question.Length > 1000) question = question[..1000];
+    if (string.IsNullOrWhiteSpace(req.ApiKey))
+        return Results.BadRequest(new { error = "Missing key." });
+
+    // Per-IP fixed-window limit — a voice turn may search a few times, so allow more than text chat.
+    var ip = ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+    var bucket = $"live_search_rl:{ip}:{DateTimeOffset.UtcNow:yyyyMMddHHmm}";
+    var used = cache.Get<int>(bucket);
+    if (used >= Math.Max(10, cfg.ChatRateLimitPerMinutePerIp * 5))
+        return Results.Json(new { error = "Too many requests — slow down." }, statusCode: 429);
+    cache.Set(bucket, used + 1, TimeSpan.FromMinutes(1));
+
+    if (string.IsNullOrWhiteSpace(cfg.EmbeddingModel))
+        return Results.Ok(new { posts = Array.Empty<object>() });
+
+    var window = RetrievalService.ParseWindow(req.Window);
+    var search = await retrieval.SearchAsync(
+        question, cfg.EmbeddingModel, cfg.EmbeddingDim, window, cfg.RetrievalTopK, new[] { req.ApiKey! }, ct);
+    if (search.Error is not null)
+        return Results.Ok(new { posts = Array.Empty<object>() });
+
+    var posts = search.Hits.Take(Math.Max(1, cfg.ChatMaxContextPosts))
+        .Select(h => new { id = h.V2exId, title = h.Title, url = h.SourceUrl, published = h.Published, snippet = h.Snippet });
+    return Results.Ok(new { posts });
+});
+
 await app.RunAsync();
 return 0;
 
@@ -402,3 +446,6 @@ record ChatRequest(string? Question, string? ApiKey, string? Window, string? Mod
 
 /// <summary>Body for the public chat model-picker lookup: the visitor's own Gemini key.</summary>
 record ChatModelsRequest(string? ApiKey);
+
+/// <summary>Body for a /live voice tool-call: a search query + the visitor's own Gemini key.</summary>
+record LiveSearchRequest(string? Question, string? ApiKey, string? Window);
