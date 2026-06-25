@@ -24,6 +24,25 @@
     var INPUT_RATE = 16000;   // Gemini expects 16 kHz PCM16 mono input
     var OUTPUT_RATE = 24000;  // Gemini streams 24 kHz PCM16 mono output
 
+    // Grounding: the model answers about the V2EX feed by calling a search tool (function calling),
+    // which retrieves real posts from the server — the same RAG the text chat uses.
+    var GROUND_PROMPT =
+        "You are a friendly voice assistant for an English-language mirror of the Chinese tech forum " +
+        "V2EX. Whenever the user asks about posts, discussions, news, opinions, or topics, you MUST call " +
+        "the search_v2ex_posts function first and base your answer ONLY on the posts it returns, citing " +
+        "them by title. If it returns no posts, say you couldn't find any in the feed. For small talk you " +
+        "may answer directly. Keep replies concise and conversational, and always speak in English.";
+    var SEARCH_DECL = {
+        name: "search_v2ex_posts",
+        description: "Search the English V2EX post feed for posts relevant to the user's question. " +
+            "Call this before answering anything about posts, discussions, or topics on the feed.",
+        parameters: {
+            type: "object",
+            properties: { query: { type: "string", description: "The search query, in English." } },
+            required: ["query"]
+        }
+    };
+
     // ── Settings panel (key + model) ─────────────────────────────────────────────────────
     function setSettings(open) {
         settingsPanel.hidden = !open;
@@ -180,17 +199,53 @@
         src.onended = function () {
             var k = queued.indexOf(src);
             if (k >= 0) queued.splice(k, 1);
-            if (running && !queued.length) { setStatus("listening", "Listening"); caption("Listening… speak now"); }
+            if (running && !queued.length) { setStatus("listening", "Listening"); caption("Listening… ask about the feed"); }
         };
         setStatus("speaking", "Speaking");
+    }
+
+    function sendToolResponse(fc, posts) {
+        var result = posts && posts.length
+            ? posts.map(function (p, i) {
+                return "[#" + (i + 1) + "] " + p.title + "\n" + (p.url || "") + "\n" + (p.snippet || "");
+            }).join("\n\n")
+            : "No matching posts were found in the feed.";
+        try {
+            ws.send(JSON.stringify({
+                toolResponse: { functionResponses: [{ id: fc.id, name: fc.name, response: { result: result } }] }
+            }));
+        } catch (e) { }
+    }
+
+    function handleToolCall(toolCall) {
+        var calls = (toolCall && toolCall.functionCalls) || [];
+        calls.forEach(function (fc) {
+            if (fc.name !== "search_v2ex_posts") { sendToolResponse(fc, []); return; }
+            var query = (fc.args && fc.args.query) || "";
+            setStatus("searching", "Searching");
+            caption("Searching the feed…");
+            fetch("/api/live/search", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ question: query, apiKey: keyEl.value.trim(), window: "all" })
+            }).then(function (r) {
+                return r.ok ? r.json() : { posts: [] };
+            }).then(function (data) {
+                if (query) logLine("you", query);
+                closeLogLines();
+                sendToolResponse(fc, (data && data.posts) || []);
+            }).catch(function () { sendToolResponse(fc, []); });
+        });
     }
 
     function handleServerMessage(obj) {
         if (obj.setupComplete) {
             setStatus("listening", "Listening");
-            caption("Listening… speak now");
+            caption("Listening… ask about the feed");
             return;
         }
+        if (obj.toolCall) { handleToolCall(obj.toolCall); return; }
+        if (obj.toolCallCancellation) return;
         var sc = obj.serverContent;
         if (!sc) return;
         if (sc.interrupted) { stopPlayback(); setStatus("listening", "Listening"); return; }
@@ -209,7 +264,7 @@
         if (sc.turnComplete) {
             closeLogLines();
             // Let any buffered audio finish, then return to a listening state.
-            if (!queued.length) { setStatus("listening", "Listening"); caption("Listening… speak now"); }
+            if (!queued.length) { setStatus("listening", "Listening"); caption("Listening… ask about the feed"); }
         }
     }
 
@@ -263,7 +318,8 @@
                 setup: {
                     model: model.indexOf("models/") === 0 ? model : "models/" + model,
                     generationConfig: { responseModalities: ["AUDIO"] },
-                    systemInstruction: { parts: [{ text: "You are a friendly, concise voice assistant. Reply conversationally in English." }] },
+                    systemInstruction: { parts: [{ text: GROUND_PROMPT }] },
+                    tools: [{ functionDeclarations: [SEARCH_DECL] }],
                     inputAudioTranscription: {},
                     outputAudioTranscription: {}
                 }
@@ -308,7 +364,7 @@
         running = false;
         micBtn.classList.remove("is-live");
         micBtn.setAttribute("aria-label", "Start talking");
-        caption("Tap the mic and start talking");
+        caption("Tap the mic and ask about the feed");
         if (statusEl.getAttribute("data-state") !== "error") setStatus("idle", "Idle");
 
         stopPlayback();
