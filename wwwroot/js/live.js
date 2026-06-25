@@ -239,6 +239,12 @@
     }
 
     function handleServerMessage(obj) {
+        if (window.LIVE_DEBUG) console.debug("[live] <<", obj);
+        // Defensive: if Gemini ever sends a JSON error frame instead of closing, surface it.
+        if (obj.error) {
+            fail("Gemini error: " + (obj.error.message || JSON.stringify(obj.error)), obj.error);
+            return;
+        }
         if (obj.setupComplete) {
             setStatus("listening", "Listening");
             caption("Listening… ask about the feed");
@@ -278,7 +284,9 @@
         }
     }
 
-    function fail(msg) {
+    function fail(msg, detail) {
+        if (detail !== undefined) console.error("[live] " + msg, detail);
+        else console.error("[live] " + msg);
         caption("⚠ " + msg);
         setStatus("error", "Error");
         stopSession();
@@ -314,7 +322,7 @@
         ws.binaryType = "arraybuffer";
 
         ws.onopen = function () {
-            ws.send(JSON.stringify({
+            var setupMsg = {
                 setup: {
                     model: model.indexOf("models/") === 0 ? model : "models/" + model,
                     generationConfig: { responseModalities: ["AUDIO"] },
@@ -323,16 +331,27 @@
                     inputAudioTranscription: {},
                     outputAudioTranscription: {}
                 }
-            }));
+            };
+            console.log("[live] connected; sending setup for model:", setupMsg.setup.model);
+            if (window.LIVE_DEBUG) console.debug("[live] >> setup", setupMsg);
+            ws.send(JSON.stringify(setupMsg));
             startMic();
         };
         ws.onmessage = function (ev) { readMessage(ev.data); };
-        ws.onerror = function () { fail("Connection error — check your key and that the model supports live audio."); };
+        ws.onerror = function (ev) {
+            // The WebSocket error event is intentionally detail-free for security; the real cause
+            // (unsupported model, bad key, quota, invalid argument) arrives in the close frame below,
+            // so just log here and let onclose surface ev.reason.
+            console.error("[live] WebSocket error event (the close code/reason next has the real cause):", ev);
+        };
         ws.onclose = function (ev) {
-            if (running) {
-                if (ev.code === 1007 || ev.code === 1008 || ev.code === 1011) fail("Gemini closed the session (" + (ev.reason || ev.code) + ").");
-                else stopSession();
-            }
+            console.warn("[live] WebSocket closed — code:", ev.code, "reason:", ev.reason || "(none)", "wasClean:", ev.wasClean);
+            if (!running) return;                              // we closed it ourselves via stopSession()
+            if (ev.code === 1000) { stopSession(); return; }   // normal close — no error banner
+            // 1007 invalid payload, 1008 policy/auth, 1011 server error — Gemini puts the
+            // human-readable cause in ev.reason (e.g. model not found, API key invalid).
+            var why = ev.reason ? ev.reason : ("connection closed unexpectedly (code " + ev.code + ")");
+            fail("Gemini closed the session: " + why, { code: ev.code, reason: ev.reason });
         };
 
         running = true;
@@ -352,8 +371,11 @@
                 var s = Math.max(-1, Math.min(1, input[i]));
                 pcm[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
             }
+            // Live API: stream mic audio via realtimeInput.audio (a single Blob). The older
+            // realtimeInput.mediaChunks form is deprecated and rejected with close code 1007 by
+            // current models (e.g. Gemini 3.1 Flash Live).
             ws.send(JSON.stringify({
-                realtimeInput: { mediaChunks: [{ mimeType: "audio/pcm;rate=" + INPUT_RATE, data: int16ToB64(pcm) }] }
+                realtimeInput: { audio: { mimeType: "audio/pcm;rate=" + INPUT_RATE, data: int16ToB64(pcm) } }
             }));
         };
         srcNode.connect(procNode);
