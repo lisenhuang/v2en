@@ -1,0 +1,70 @@
+@page "/live"
+@model v2en.Pages.LiveModel
+@{
+    ViewData["Title"] = "Talk live";
+    ViewData["Description"] = "Real-time voice chat with Gemini using your own Google AI Studio key.";
+}
+
+@if (!Model.Enabled)
+{
+    <div class="ask-app">
+        <div class="ask-card ask-disabled">
+            <p>💤 Live voice chat isn't available right now. Please check back later.</p>
+        </div>
+    </div>
+}
+else
+{
+    <div class="ask-app live-app">
+        <section class="ask-intro">
+            <h1>Talk live</h1>
+            <p>Real-time voice chat powered by Gemini's live audio models — using your own key.</p>
+        </section>
+
+        <div class="ask-card">
+            <div class="ask-toolbar">
+                <button type="button" class="ask-settings-btn" id="ask-settings-btn"
+                        aria-expanded="false" aria-controls="ask-settings" title="Key &amp; model settings">
+                    <span class="ask-gear" aria-hidden="true">⚙</span><span class="ask-settings-text">Settings</span>
+                    <span class="ask-key-dot" id="ask-key-dot" title="No key set"></span>
+                </button>
+                <span class="ask-toolbar-spacer"></span>
+                <span class="live-status" id="live-status" data-state="idle">Idle</span>
+            </div>
+
+            <div class="ask-settings" id="ask-settings" hidden>
+                <div class="ask-field">
+                    <label for="ask-key">Google AI Studio key</label>
+                    <input type="password" id="ask-key" class="ask-key" autocomplete="off" placeholder="AIza…" />
+                    <label class="ask-save" title="Save on this device"><input type="checkbox" id="ask-remember" /> Save on this device</label>
+                </div>
+                <div class="ask-field">
+                    <label for="live-model">Live audio model</label>
+                    <select id="live-model" class="ask-model" aria-label="Live audio model" title="Add your key to load models" disabled>
+                        <option value="">Loading models…</option>
+                    </select>
+                </div>
+                <p class="ask-bar-hint">
+                    🔒 Connects directly from your browser to Google with your key — never sent to or stored on this server.
+                    <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Get a free key →</a>
+                </p>
+            </div>
+
+            <div class="live-stage">
+                <button type="button" class="live-mic" id="live-mic" aria-label="Start talking">
+                    <span class="live-mic-icon" aria-hidden="true">🎙️</span>
+                    <span class="live-mic-ring"></span>
+                </button>
+                <p class="live-caption" id="live-caption">Tap the mic and start talking</p>
+            </div>
+
+            <div class="live-log" id="live-log" aria-live="polite"></div>
+        </div>
+
+        <p class="ask-foot">Voice is streamed to Google in real time. Answers are AI-generated and may be inaccurate.</p>
+    </div>
+}
+
+@section Scripts {
+    <script src="~/js/live.js" asp-append-version="true"></script>
+}

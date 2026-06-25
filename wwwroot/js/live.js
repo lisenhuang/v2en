@@ -1,0 +1,329 @@
+(function () {
+    "use strict";
+
+    var micBtn = document.getElementById("live-mic");
+    if (!micBtn) return;
+
+    var keyEl = document.getElementById("ask-key");
+    var remember = document.getElementById("ask-remember");
+    var modelEl = document.getElementById("live-model");
+    var settingsBtn = document.getElementById("ask-settings-btn");
+    var settingsPanel = document.getElementById("ask-settings");
+    var keyDot = document.getElementById("ask-key-dot");
+    var statusEl = document.getElementById("live-status");
+    var captionEl = document.getElementById("live-caption");
+    var logEl = document.getElementById("live-log");
+
+    var KEY_LS = "v2en_gemini_key";              // shared with the /ask page
+    var MODEL_LS = "v2en_gemini_live_model";
+
+    // Gemini Live API (v1beta bidirectional streaming). The browser connects directly with the
+    // visitor's own key — audio never passes through this server.
+    var WS_BASE = "wss://generativelanguage.googleapis.com/ws/" +
+        "google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent";
+    var INPUT_RATE = 16000;   // Gemini expects 16 kHz PCM16 mono input
+    var OUTPUT_RATE = 24000;  // Gemini streams 24 kHz PCM16 mono output
+
+    // ── Settings panel (key + model) ─────────────────────────────────────────────────────
+    function setSettings(open) {
+        settingsPanel.hidden = !open;
+        settingsBtn.setAttribute("aria-expanded", open ? "true" : "false");
+        settingsBtn.classList.toggle("is-open", open);
+        if (open) keyEl.focus();
+    }
+    settingsBtn.addEventListener("click", function () { setSettings(settingsPanel.hidden); });
+
+    function reflectKey() {
+        var has = !!keyEl.value.trim();
+        keyDot.classList.toggle("is-set", has);
+        keyDot.title = has ? "Key set" : "No key set";
+    }
+
+    var hadSavedKey = false;
+    try {
+        var saved = localStorage.getItem(KEY_LS);
+        if (saved) { keyEl.value = saved; remember.checked = true; hadSavedKey = true; }
+    } catch (e) { }
+    reflectKey();
+    setSettings(!hadSavedKey);
+
+    function persistKey() {
+        try {
+            if (remember.checked && keyEl.value.trim()) localStorage.setItem(KEY_LS, keyEl.value.trim());
+            else localStorage.removeItem(KEY_LS);
+        } catch (e) { }
+    }
+    remember.addEventListener("change", persistKey);
+    keyEl.addEventListener("input", reflectKey);
+
+    // ── Live model picker (loaded from the visitor's own key; never hardcoded) ────────────
+    var savedModel = "";
+    try { savedModel = localStorage.getItem(MODEL_LS) || ""; } catch (e) { }
+    var modelsLoadedFor = null;
+
+    modelEl.addEventListener("change", function () {
+        try { localStorage.setItem(MODEL_LS, modelEl.value); } catch (e) { }
+    });
+
+    function setModelOptions(models) {
+        var want = modelEl.value || savedModel;
+        modelEl.innerHTML = "";
+        if (!models.length) {
+            var none = document.createElement("option");
+            none.value = ""; none.textContent = "No live models on this key";
+            modelEl.appendChild(none);
+            modelEl.disabled = true;
+            return;
+        }
+        models.forEach(function (m) {
+            var o = document.createElement("option");
+            o.value = m.id; o.textContent = m.displayName || m.id;
+            modelEl.appendChild(o);
+        });
+        if (want && models.some(function (m) { return m.id === want; })) modelEl.value = want;
+        modelEl.disabled = false;
+        modelEl.title = "Live audio model";
+    }
+
+    function loadModels() {
+        var key = keyEl.value.trim();
+        if (!key || key === modelsLoadedFor) return;
+        fetch("/api/chat/models", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ apiKey: key })
+        }).then(function (r) {
+            return r.ok ? r.json() : null;
+        }).then(function (data) {
+            if (data && data.live) {
+                modelsLoadedFor = key;
+                setModelOptions(data.live);
+            }
+        }).catch(function () { });
+    }
+    keyEl.addEventListener("change", function () { persistKey(); reflectKey(); loadModels(); });
+    if (keyEl.value.trim()) loadModels();
+
+    // ── UI helpers ────────────────────────────────────────────────────────────────────────
+    function setStatus(state, text) {
+        statusEl.setAttribute("data-state", state);
+        statusEl.textContent = text;
+    }
+    function caption(text) { captionEl.textContent = text; }
+    function logLine(role, text) {
+        if (!text) return;
+        var last = logEl.lastElementChild;
+        // Append to the same line while a transcript streams in token-by-token.
+        if (last && last.getAttribute("data-role") === role && last.getAttribute("data-open") === "1") {
+            last.querySelector(".live-log-text").textContent += text;
+        } else {
+            if (last) last.setAttribute("data-open", "0");
+            var el = document.createElement("div");
+            el.className = "live-log-line live-" + role;
+            el.setAttribute("data-role", role);
+            el.setAttribute("data-open", "1");
+            el.innerHTML = '<span class="live-log-who">' + (role === "you" ? "You" : "Gemini") + '</span>'
+                + '<span class="live-log-text"></span>';
+            el.querySelector(".live-log-text").textContent = text;
+            logEl.appendChild(el);
+        }
+        logEl.scrollTop = logEl.scrollHeight;
+    }
+    function closeLogLines() {
+        var last = logEl.lastElementChild;
+        if (last) last.setAttribute("data-open", "0");
+    }
+
+    // ── base64 <-> PCM helpers ──────────────────────────────────────────────────────────────
+    function b64ToInt16(b64) {
+        var bin = atob(b64);
+        var len = bin.length;
+        var bytes = new Uint8Array(len);
+        for (var i = 0; i < len; i++) bytes[i] = bin.charCodeAt(i);
+        // PCM16 little-endian; view the byte buffer as Int16 (handle odd lengths defensively).
+        return new Int16Array(bytes.buffer, 0, len >> 1);
+    }
+    function int16ToB64(int16) {
+        var bytes = new Uint8Array(int16.buffer, int16.byteOffset, int16.byteLength);
+        var out = "";
+        var CHUNK = 0x8000;
+        for (var i = 0; i < bytes.length; i += CHUNK) {
+            out += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+        }
+        return btoa(out);
+    }
+
+    // ── Session state ─────────────────────────────────────────────────────────────────────
+    var ws = null, micStream = null, inCtx = null, outCtx = null, procNode = null, srcNode = null;
+    var running = false, playHead = 0, queued = [];
+
+    function stopPlayback() {
+        queued.forEach(function (s) { try { s.stop(); } catch (e) { } });
+        queued = [];
+        playHead = 0;
+    }
+
+    function playPcm(int16) {
+        if (!outCtx) return;
+        var f32 = new Float32Array(int16.length);
+        for (var i = 0; i < int16.length; i++) f32[i] = int16[i] / 32768;
+        var buf = outCtx.createBuffer(1, f32.length, OUTPUT_RATE);
+        buf.getChannelData(0).set(f32);
+        var src = outCtx.createBufferSource();
+        src.buffer = buf;
+        src.connect(outCtx.destination);
+        var now = outCtx.currentTime;
+        if (playHead < now) playHead = now;
+        src.start(playHead);
+        playHead += buf.duration;
+        queued.push(src);
+        src.onended = function () {
+            var k = queued.indexOf(src);
+            if (k >= 0) queued.splice(k, 1);
+            if (running && !queued.length) { setStatus("listening", "Listening"); caption("Listening… speak now"); }
+        };
+        setStatus("speaking", "Speaking");
+    }
+
+    function handleServerMessage(obj) {
+        if (obj.setupComplete) {
+            setStatus("listening", "Listening");
+            caption("Listening… speak now");
+            return;
+        }
+        var sc = obj.serverContent;
+        if (!sc) return;
+        if (sc.interrupted) { stopPlayback(); setStatus("listening", "Listening"); return; }
+        if (sc.inputTranscription && sc.inputTranscription.text) logLine("you", sc.inputTranscription.text);
+        if (sc.outputTranscription && sc.outputTranscription.text) logLine("ai", sc.outputTranscription.text);
+        if (sc.modelTurn && sc.modelTurn.parts) {
+            sc.modelTurn.parts.forEach(function (p) {
+                if (p.inlineData && p.inlineData.data &&
+                    /audio\/pcm/i.test(p.inlineData.mimeType || "audio/pcm")) {
+                    playPcm(b64ToInt16(p.inlineData.data));
+                } else if (p.text) {
+                    logLine("ai", p.text);
+                }
+            });
+        }
+        if (sc.turnComplete) {
+            closeLogLines();
+            // Let any buffered audio finish, then return to a listening state.
+            if (!queued.length) { setStatus("listening", "Listening"); caption("Listening… speak now"); }
+        }
+    }
+
+    function readMessage(data) {
+        if (typeof data === "string") {
+            try { handleServerMessage(JSON.parse(data)); } catch (e) { }
+        } else if (data instanceof Blob) {
+            data.text().then(function (t) { try { handleServerMessage(JSON.parse(t)); } catch (e) { } });
+        } else if (data instanceof ArrayBuffer) {
+            try { handleServerMessage(JSON.parse(new TextDecoder().decode(data))); } catch (e) { }
+        }
+    }
+
+    function fail(msg) {
+        caption("⚠ " + msg);
+        setStatus("error", "Error");
+        stopSession();
+    }
+
+    async function startSession() {
+        var key = keyEl.value.trim();
+        if (!key) { setSettings(true); caption("Add your Google AI Studio key first."); return; }
+        var model = modelEl.value;
+        if (!model) { setSettings(true); caption("Pick a live audio model first."); return; }
+
+        setStatus("connecting", "Connecting");
+        caption("Requesting microphone…");
+
+        try {
+            micStream = await navigator.mediaDevices.getUserMedia({
+                audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true }
+            });
+        } catch (e) {
+            return fail("Microphone permission denied.");
+        }
+
+        try {
+            inCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: INPUT_RATE });
+            outCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: OUTPUT_RATE });
+            await outCtx.resume();
+        } catch (e) {
+            return fail("Audio isn't supported in this browser.");
+        }
+
+        caption("Connecting to Gemini…");
+        ws = new WebSocket(WS_BASE + "?key=" + encodeURIComponent(key));
+        ws.binaryType = "arraybuffer";
+
+        ws.onopen = function () {
+            ws.send(JSON.stringify({
+                setup: {
+                    model: model.indexOf("models/") === 0 ? model : "models/" + model,
+                    generationConfig: { responseModalities: ["AUDIO"] },
+                    systemInstruction: { parts: [{ text: "You are a friendly, concise voice assistant. Reply conversationally in English." }] },
+                    inputAudioTranscription: {},
+                    outputAudioTranscription: {}
+                }
+            }));
+            startMic();
+        };
+        ws.onmessage = function (ev) { readMessage(ev.data); };
+        ws.onerror = function () { fail("Connection error — check your key and that the model supports live audio."); };
+        ws.onclose = function (ev) {
+            if (running) {
+                if (ev.code === 1007 || ev.code === 1008 || ev.code === 1011) fail("Gemini closed the session (" + (ev.reason || ev.code) + ").");
+                else stopSession();
+            }
+        };
+
+        running = true;
+        micBtn.classList.add("is-live");
+        micBtn.setAttribute("aria-label", "Stop");
+    }
+
+    function startMic() {
+        srcNode = inCtx.createMediaStreamSource(micStream);
+        // ScriptProcessor is deprecated but universally available and adequate for 16 kHz capture.
+        procNode = inCtx.createScriptProcessor(2048, 1, 1);
+        procNode.onaudioprocess = function (e) {
+            if (!ws || ws.readyState !== WebSocket.OPEN) return;
+            var input = e.inputBuffer.getChannelData(0); // Float32 @ 16 kHz
+            var pcm = new Int16Array(input.length);
+            for (var i = 0; i < input.length; i++) {
+                var s = Math.max(-1, Math.min(1, input[i]));
+                pcm[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+            }
+            ws.send(JSON.stringify({
+                realtimeInput: { mediaChunks: [{ mimeType: "audio/pcm;rate=" + INPUT_RATE, data: int16ToB64(pcm) }] }
+            }));
+        };
+        srcNode.connect(procNode);
+        procNode.connect(inCtx.destination); // keep the node alive (it outputs silence)
+    }
+
+    function stopSession() {
+        running = false;
+        micBtn.classList.remove("is-live");
+        micBtn.setAttribute("aria-label", "Start talking");
+        caption("Tap the mic and start talking");
+        if (statusEl.getAttribute("data-state") !== "error") setStatus("idle", "Idle");
+
+        stopPlayback();
+        try { if (procNode) procNode.disconnect(); } catch (e) { }
+        try { if (srcNode) srcNode.disconnect(); } catch (e) { }
+        try { if (ws && ws.readyState <= 1) ws.close(); } catch (e) { }
+        if (micStream) micStream.getTracks().forEach(function (t) { try { t.stop(); } catch (e) { } });
+        try { if (inCtx) inCtx.close(); } catch (e) { }
+        try { if (outCtx) outCtx.close(); } catch (e) { }
+        ws = micStream = inCtx = outCtx = procNode = srcNode = null;
+    }
+
+    micBtn.addEventListener("click", function () {
+        if (running) stopSession();
+        else startSession();
+    });
+    window.addEventListener("beforeunload", function () { if (running) stopSession(); });
+})();
