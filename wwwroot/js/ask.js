@@ -6,11 +6,12 @@
 
     var input = document.getElementById("ask-input");
     var keyEl = document.getElementById("ask-key");
-    var keyWrap = document.getElementById("ask-key-wrap");
-    var keyPill = document.getElementById("ask-key-pill");
     var remember = document.getElementById("ask-remember");
     var windowEl = document.getElementById("ask-window");
     var modelEl = document.getElementById("ask-model");
+    var settingsBtn = document.getElementById("ask-settings-btn");
+    var settingsPanel = document.getElementById("ask-settings");
+    var keyDot = document.getElementById("ask-key-dot");
     var thread = document.getElementById("ask-thread");
     var empty = document.getElementById("ask-empty");
     var sendBtn = document.getElementById("ask-send");
@@ -18,15 +19,29 @@
     var WIN_LS = "v2en_ask_window";
     var MODEL_LS = "v2en_gemini_model";
 
-    function collapseKey() { keyWrap.hidden = true; keyPill.hidden = false; }
-    function expandKey() { keyWrap.hidden = false; keyPill.hidden = true; keyEl.focus(); }
-    keyPill.addEventListener("click", expandKey);
+    // ── Settings panel (key + model) behind the gear button ──────────────────────────────
+    function setSettings(open) {
+        settingsPanel.hidden = !open;
+        settingsBtn.setAttribute("aria-expanded", open ? "true" : "false");
+        settingsBtn.classList.toggle("is-open", open);
+        if (open) keyEl.focus();
+    }
+    settingsBtn.addEventListener("click", function () { setSettings(settingsPanel.hidden); });
 
-    // Restore a remembered key — then collapse the bar so the chat takes the space.
+    function reflectKey() {
+        var has = !!keyEl.value.trim();
+        keyDot.classList.toggle("is-set", has);
+        keyDot.title = has ? "Key set" : "No key set";
+    }
+
+    // Restore a remembered key. If none, open settings so first-time visitors see where to add it.
+    var hadSavedKey = false;
     try {
         var saved = localStorage.getItem(KEY_LS);
-        if (saved) { keyEl.value = saved; remember.checked = true; collapseKey(); }
+        if (saved) { keyEl.value = saved; remember.checked = true; hadSavedKey = true; }
     } catch (e) { }
+    reflectKey();
+    setSettings(!hadSavedKey);
 
     function persistKey() {
         try {
@@ -35,8 +50,9 @@
         } catch (e) { }
     }
     remember.addEventListener("change", persistKey);
+    keyEl.addEventListener("input", reflectKey);
 
-    // Remember the time-window choice across reloads (defaults to the HTML-selected option otherwise).
+    // ── Time-window choice, remembered across reloads ────────────────────────────────────
     try {
         var savedWin = localStorage.getItem(WIN_LS);
         if (savedWin) windowEl.value = savedWin;
@@ -64,7 +80,6 @@
             o.value = m.id; o.textContent = m.displayName || m.id;
             modelEl.appendChild(o);
         });
-        // Restore the previously chosen model if the key still grants it.
         if (want && models.some(function (m) { return m.id === want; })) modelEl.value = want;
         modelEl.disabled = false;
         modelEl.title = "Chat model";
@@ -87,10 +102,11 @@
         }).catch(function () { });
     }
 
-    // Persist the key AND (re)load that key's available models whenever it changes.
-    keyEl.addEventListener("change", function () { persistKey(); loadModels(); });
+    // Persist the key, refresh the dot, AND (re)load that key's models whenever it changes.
+    keyEl.addEventListener("change", function () { persistKey(); reflectKey(); loadModels(); });
     if (keyEl.value.trim()) loadModels();
 
+    // ── Composer ─────────────────────────────────────────────────────────────────────────
     document.querySelectorAll(".ask-chip").forEach(function (c) {
         c.addEventListener("click", function () {
             input.value = c.getAttribute("data-q");
@@ -131,7 +147,7 @@
             html += '<div class="ask-sources"><span class="ask-sources-h">Sources</span><ul>';
             sources.forEach(function (s) {
                 var d = new Date(s.published);
-                html += "<li><a href=\"/t/" + encodeURIComponent(s.id) + "\">" + esc(s.title) + "</a>"
+                html += "<li><a href=\"/t/" + encodeURIComponent(s.id) + "\" target=\"_blank\" rel=\"noopener\">" + esc(s.title) + "</a>"
                     + " <a class=\"ask-src-ext\" href=\"" + esc(s.url) + "\" target=\"_blank\" rel=\"noopener\">v2ex ↗</a>"
                     + " <time datetime=\"" + esc(s.published) + "\">" + (isNaN(d) ? "" : d.toLocaleDateString()) + "</time></li>";
             });
@@ -157,9 +173,8 @@
         var q = input.value.trim();
         if (!q) return;
         var key = keyEl.value.trim();
-        if (!key) { expandKey(); flash(keyEl); return; }
+        if (!key) { setSettings(true); flash(keyEl); return; }
         persistKey();
-        if (remember.checked) collapseKey();
 
         addUser(q);
         input.value = ""; autogrow();

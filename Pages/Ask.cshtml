@@ -5,57 +5,73 @@
     ViewData["Description"] = "Ask questions about V2EX posts and get an English answer with sources.";
 }
 
-<section class="ask-intro">
-    <h1>Ask the feed</h1>
-    <p>Ask in English about recent V2EX posts — get an answer with sources.</p>
-</section>
-
 @if (!Model.Enabled)
 {
-    <div class="ask-card ask-disabled">
-        <p>💤 The chat isn't available right now. Please check back later.</p>
+    <div class="ask-app">
+        <div class="ask-card ask-disabled">
+            <p>💤 The chat isn't available right now. Please check back later.</p>
+        </div>
     </div>
 }
 else
 {
-    <div class="ask-card">
-        <div class="ask-bar">
-            <div class="ask-key-wrap" id="ask-key-wrap">
-                <input type="password" id="ask-key" class="ask-key" autocomplete="off" placeholder="Google AI Studio key" />
-                <label class="ask-save" title="Save on this device"><input type="checkbox" id="ask-remember" /> save</label>
-            </div>
-            <button type="button" class="ask-key-pill" id="ask-key-pill" hidden>🔑 Key saved · change</button>
-            <select id="ask-window" class="ask-win" aria-label="Time range">
-                <option value="24h">24h</option>
-                <option value="7d" selected>7 days</option>
-                <option value="30d">30 days</option>
-                <option value="all">All time</option>
-            </select>
-            <select id="ask-model" class="ask-model" aria-label="Chat model" title="Add your key to load models" disabled>
-                <option value="">Default model</option>
-            </select>
-        </div>
-        <p class="ask-bar-hint">
-            🔒 Used to search and answer on your behalf — never stored.
-            <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Get a free key →</a>
-        </p>
+    <div class="ask-app">
+        <section class="ask-intro">
+            <h1>Ask the feed</h1>
+            <p>Ask in English about recent V2EX posts — get an answer with sources.</p>
+        </section>
 
-        <div class="ask-thread" id="ask-thread">
-            <div class="ask-empty" id="ask-empty">
-                <p>Try:
-                    <button type="button" class="ask-chip" data-q="What are people discussing about AI? Summarize the main views.">“Discussions about AI?”</button>
-                    <button type="button" class="ask-chip" data-q="Any interesting self-hosting or homelab posts? Summarize them.">“Self-hosting posts?”</button>
+        <div class="ask-card">
+            <div class="ask-toolbar">
+                <button type="button" class="ask-settings-btn" id="ask-settings-btn"
+                        aria-expanded="false" aria-controls="ask-settings" title="Key &amp; model settings">
+                    <span class="ask-gear" aria-hidden="true">⚙</span><span class="ask-settings-text">Settings</span>
+                    <span class="ask-key-dot" id="ask-key-dot" title="No key set"></span>
+                </button>
+                <span class="ask-toolbar-spacer"></span>
+                <select id="ask-window" class="ask-win" aria-label="Time range">
+                    <option value="24h">24h</option>
+                    <option value="7d" selected>7 days</option>
+                    <option value="30d">30 days</option>
+                    <option value="all">All time</option>
+                </select>
+            </div>
+
+            <div class="ask-settings" id="ask-settings" hidden>
+                <div class="ask-field">
+                    <label for="ask-key">Google AI Studio key</label>
+                    <input type="password" id="ask-key" class="ask-key" autocomplete="off" placeholder="AIza…" />
+                    <label class="ask-save" title="Save on this device"><input type="checkbox" id="ask-remember" /> Save on this device</label>
+                </div>
+                <div class="ask-field">
+                    <label for="ask-model">Chat model</label>
+                    <select id="ask-model" class="ask-model" aria-label="Chat model" title="Add your key to load models" disabled>
+                        <option value="">Default model</option>
+                    </select>
+                </div>
+                <p class="ask-bar-hint">
+                    🔒 Used to search and answer on your behalf — never stored.
+                    <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Get a free key →</a>
                 </p>
             </div>
+
+            <div class="ask-thread" id="ask-thread">
+                <div class="ask-empty" id="ask-empty">
+                    <p>Try:
+                        <button type="button" class="ask-chip" data-q="What are people discussing about AI? Summarize the main views.">“Discussions about AI?”</button>
+                        <button type="button" class="ask-chip" data-q="Any interesting self-hosting or homelab posts? Summarize them.">“Self-hosting posts?”</button>
+                    </p>
+                </div>
+            </div>
+
+            <form class="ask-composer" id="ask-form">
+                <textarea id="ask-input" rows="1" placeholder="Ask in English…" required></textarea>
+                <button type="submit" class="ask-send" id="ask-send" aria-label="Ask">Ask</button>
+            </form>
         </div>
 
-        <form class="ask-composer" id="ask-form">
-            <textarea id="ask-input" rows="1" placeholder="Ask in English…" required></textarea>
-            <button type="submit" class="ask-send" id="ask-send" aria-label="Ask">Ask</button>
-        </form>
+        <p class="ask-foot">Answers are AI-generated from forum posts and may be inaccurate.</p>
     </div>
-
-    <p class="ask-foot">Answers are AI-generated from forum posts and may be inaccurate.</p>
 }
 
 @section Scripts {
