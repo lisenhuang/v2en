@@ -5,7 +5,7 @@ using System.Text.Json;
 namespace v2en.Services;
 
 public record ChatSource(long V2exId, string Title, string Url, DateTimeOffset Published);
-public record ChatResult(bool Success, string? Answer, IReadOnlyList<ChatSource> Sources, int? HttpStatus, string? Error);
+public record ChatResult(bool Success, string? Answer, IReadOnlyList<ChatSource> Sources, int? HttpStatus, string? Error, string? Detail = null);
 
 /// <summary>
 /// Calls Gemini generateContent to answer a question from retrieved posts, using the PUBLIC
@@ -49,42 +49,70 @@ public class GeminiChatService
             generationConfig = new { temperature = 0.3 },
         };
 
-        try
+        // Gemini answers 503 UNAVAILABLE when a model is momentarily overloaded and 500 on transient
+        // internal errors — Google's guidance is to retry these with backoff. Client errors (key/quota,
+        // 4xx) won't change on retry, so we surface those immediately.
+        const int maxAttempts = 3;
+        int lastStatus = 0;
+        string lastRaw = "";
+        for (int attempt = 1; attempt <= maxAttempts; attempt++)
         {
-            using var req = new HttpRequestMessage(HttpMethod.Post, $"v1beta/models/{model}:generateContent")
+            try
             {
-                Content = JsonContent.Create(body),
-            };
-            req.Headers.TryAddWithoutValidation("x-goog-api-key", userApiKey); // per-request; never stored/logged
-            using var resp = await _http.SendAsync(req, ct);
-            var status = (int)resp.StatusCode;
+                using var req = new HttpRequestMessage(HttpMethod.Post, $"v1beta/models/{model}:generateContent")
+                {
+                    Content = JsonContent.Create(body),
+                };
+                req.Headers.TryAddWithoutValidation("x-goog-api-key", userApiKey); // per-request; never stored/logged
+                using var resp = await _http.SendAsync(req, ct);
+                var status = (int)resp.StatusCode;
 
-            if (!resp.IsSuccessStatusCode)
-            {
-                var raw = await SafeBodyAsync(resp, ct);
-                return new ChatResult(false, null, sources, status, MapError(status, raw));
+                if (resp.IsSuccessStatusCode)
+                {
+                    await using var stream = await resp.Content.ReadAsStreamAsync(ct);
+                    using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: ct);
+
+                    var answer = ExtractText(doc.RootElement);
+                    if (string.IsNullOrWhiteSpace(answer))
+                        return new ChatResult(false, null, sources, status,
+                            "The model returned no answer (it may have been blocked by a safety filter). Try rephrasing.");
+
+                    return new ChatResult(true, answer, sources, status, null);
+                }
+
+                lastStatus = status;
+                lastRaw = await SafeBodyAsync(resp, ct);
+
+                if (status >= 500 && attempt < maxAttempts)
+                {
+                    _logger.LogInformation("Gemini chat got {Status} (attempt {Attempt}/{Max}); retrying.", status, attempt, maxAttempts);
+                    await Task.Delay(TimeSpan.FromMilliseconds(700 * attempt), ct);
+                    continue;
+                }
+                return new ChatResult(false, null, sources, status, MapError(status, lastRaw), Clip(lastRaw));
             }
-
-            await using var stream = await resp.Content.ReadAsStreamAsync(ct);
-            using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: ct);
-
-            var answer = ExtractText(doc.RootElement);
-            if (string.IsNullOrWhiteSpace(answer))
-                return new ChatResult(false, null, sources, status,
-                    "The model returned no answer (it may have been blocked by a safety filter). Try rephrasing.");
-
-            return new ChatResult(true, answer, sources, status, null);
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex) when (attempt < maxAttempts)
+            {
+                _logger.LogWarning(ex, "Gemini chat call failed (attempt {Attempt}/{Max}); retrying.", attempt, maxAttempts);
+                await Task.Delay(TimeSpan.FromMilliseconds(700 * attempt), ct);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Gemini chat call failed.");
+                return new ChatResult(false, null, sources, null, "Couldn't reach the AI service. Try again shortly.", ex.Message);
+            }
         }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Gemini chat call failed.");
-            return new ChatResult(false, null, sources, null, "Couldn't reach the AI service. Try again shortly.");
-        }
+
+        // All attempts exhausted on a 5xx (or a transient exception on the final attempt).
+        return new ChatResult(false, null, sources, lastStatus == 0 ? null : lastStatus,
+            MapError(lastStatus, lastRaw), Clip(lastRaw));
     }
+
+    private static string Clip(string s) => string.IsNullOrEmpty(s) || s.Length <= 2000 ? s : s[..2000];
 
     private static string BuildPrompt(string question, IReadOnlyList<RetrievedPost> context)
     {
@@ -123,7 +151,8 @@ public class GeminiChatService
         400 => "Your API key was rejected or the request was invalid. Check your Google AI Studio key.",
         401 or 403 => "Your API key was rejected. Check your Google AI Studio key and its permissions.",
         429 => "Your API key hit its rate limit. Wait a bit and try again.",
-        >= 500 => "Google's AI service had an error. Try again shortly.",
+        503 => "The AI model is busy right now (Google returned \"overloaded\"). Please try again in a few seconds, or pick a different chat model in the dashboard.",
+        >= 500 => "Google's AI service had a temporary error. Try again shortly.",
         _ => "The AI request failed. Try again.",
     };
 

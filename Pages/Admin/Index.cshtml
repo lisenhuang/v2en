@@ -100,10 +100,33 @@ else if (!Model.Cfg.EnableChat)
         <div class="value">@Model.Total</div>
     </div>
     <div class="stat">
-        <div class="label">Indexed (search)</div>
+        <div class="label">Search vectors</div>
         <div class="value">@Model.Embedded</div>
-        <div class="sub">@(Model.Cfg.EnableChat ? "chat on" : "chat off")</div>
+        <div class="sub">of @Model.Total posts</div>
     </div>
+</div>
+
+<div class="card">
+    <div class="card-head">
+        <h2>Search index (vector DB)</h2>
+        <span class="badge @(Model.Cfg.EnableChat ? "ok" : "info")">chat @(Model.Cfg.EnableChat ? "on" : "off")</span>
+    </div>
+    @{
+        int cov = Model.Total > 0 ? Math.Min(100, (int)Math.Round(100.0 * Model.Embedded / Model.Total)) : 0;
+    }
+    <div class="meter @(cov >= 50 ? "" : "warn")"><span style="width:@(cov)%"></span></div>
+    <p class="muted" style="margin-top:8px">
+        <strong>@Model.Embedded</strong> vector(s) created — @cov% of <strong>@Model.Total</strong> posts indexed
+        (<strong>@(Math.Max(0, Model.Total - Model.Embedded))</strong> pending).
+        @if (!string.IsNullOrEmpty(Model.Cfg.EmbeddingModel))
+        {
+            <text>Model <span class="mono">@Model.Cfg.EmbeddingModel</span> · @Model.Cfg.EmbeddingDim-dim.</text>
+        }
+        else
+        {
+            <text>No embedding model set yet.</text>
+        }
+    </p>
 </div>
 
 <div class="card">

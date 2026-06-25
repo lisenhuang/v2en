@@ -6,18 +6,23 @@
 
     var input = document.getElementById("ask-input");
     var keyEl = document.getElementById("ask-key");
+    var keyWrap = document.getElementById("ask-key-wrap");
+    var keyPill = document.getElementById("ask-key-pill");
     var remember = document.getElementById("ask-remember");
     var windowEl = document.getElementById("ask-window");
     var thread = document.getElementById("ask-thread");
     var empty = document.getElementById("ask-empty");
-    var setup = document.getElementById("ask-setup");
     var sendBtn = document.getElementById("ask-send");
     var KEY_LS = "v2en_gemini_key";
 
-    // Restore a remembered key.
+    function collapseKey() { keyWrap.hidden = true; keyPill.hidden = false; }
+    function expandKey() { keyWrap.hidden = false; keyPill.hidden = true; keyEl.focus(); }
+    keyPill.addEventListener("click", expandKey);
+
+    // Restore a remembered key — then collapse the bar so the chat takes the space.
     try {
         var saved = localStorage.getItem(KEY_LS);
-        if (saved) { keyEl.value = saved; remember.checked = true; if (setup) setup.open = false; }
+        if (saved) { keyEl.value = saved; remember.checked = true; collapseKey(); }
     } catch (e) { }
 
     function persistKey() {
@@ -95,8 +100,9 @@
         var q = input.value.trim();
         if (!q) return;
         var key = keyEl.value.trim();
-        if (!key) { if (setup) setup.open = true; keyEl.focus(); flash(keyEl); return; }
+        if (!key) { expandKey(); flash(keyEl); return; }
         persistKey();
+        if (remember.checked) collapseKey();
 
         addUser(q);
         input.value = ""; autogrow();

@@ -151,22 +151,38 @@
         <h2>Embedding (semantic index)</h2>
         <p class="hint">Every post is embedded (original Chinese) so the chat can search the whole feed. Model list is loaded live from Gemini once a key is set.</p>
         <div class="form-grid">
-            <div class="field">
-                <label asp-for="EmbeddingModel">Embedding model</label>
-                <p class="hint">@(Model.EmbeddingModelOptions.Count > 0 ? $"{Model.EmbeddingModelOptions.Count} available" : "Add a Gemini key + save to load the list")</p>
-                <select asp-for="EmbeddingModel">
-                    <option value="">— select a model —</option>
-                    @foreach (var id in embedOptions)
-                    {
-                        <option value="@id">@id</option>
-                    }
-                </select>
-            </div>
-            <div class="field">
-                <label asp-for="EmbeddingDim">Dimensions</label>
-                <p class="hint">Must be supported by the model (e.g. 768). Lower = less storage.</p>
-                <input type="number" asp-for="EmbeddingDim" min="128" max="3072" />
-            </div>
+            @if (Model.EmbeddingLocked)
+            {
+                <div class="field">
+                    <label>Embedding model</label>
+                    <p class="hint">🔒 Locked — <strong>@Model.EmbeddedCount</strong> post(s) indexed.</p>
+                    <input type="text" value="@Model.EmbeddingModel" readonly disabled />
+                </div>
+                <div class="field">
+                    <label>Dimensions</label>
+                    <p class="hint">🔒 Locked so the query and stored vectors stay comparable.</p>
+                    <input type="text" value="@Model.EmbeddingDim" readonly disabled />
+                </div>
+            }
+            else
+            {
+                <div class="field">
+                    <label asp-for="EmbeddingModel">Embedding model</label>
+                    <p class="hint">@(Model.EmbeddingModelOptions.Count > 0 ? $"{Model.EmbeddingModelOptions.Count} available" : "Add a Gemini key + save to load the list")</p>
+                    <select asp-for="EmbeddingModel">
+                        <option value="">— select a model —</option>
+                        @foreach (var id in embedOptions)
+                        {
+                            <option value="@id">@id</option>
+                        }
+                    </select>
+                </div>
+                <div class="field">
+                    <label asp-for="EmbeddingDim">Dimensions</label>
+                    <p class="hint">Must be supported by the model (e.g. 768). Pick once — it can't change after indexing starts.</p>
+                    <input type="number" asp-for="EmbeddingDim" min="128" max="3072" />
+                </div>
+            }
             <div class="field">
                 <label asp-for="EmbedMaxPerTick">Embed per tick</label>
                 <p class="hint">Posts embedded each poll. Raise to warm the index faster.</p>
@@ -178,7 +194,16 @@
                 <input type="number" asp-for="EmbedMaxAttempts" min="1" max="20" />
             </div>
         </div>
-        <p class="hint"><strong>Note:</strong> changing the model or dimensions re-embeds every post (a new vector space).</p>
+        @if (Model.EmbeddingLocked)
+        {
+            <div class="btn-row">
+                <button type="submit" class="btn btn-ghost btn-sm" formaction="?handler=ClearIndex" formmethod="post"
+                        onclick="return confirm('Clear the entire search index (@Model.EmbeddedCount vectors)? Every post will be re-embedded from scratch — this uses embedding quota and search returns fewer results until it refills.');">
+                    Clear index to change model / dimensions
+                </button>
+                <span class="muted" style="align-self:center">Changing the model or dimensions requires clearing first.</span>
+            </div>
+        }
     </div>
 
     <div class="card">

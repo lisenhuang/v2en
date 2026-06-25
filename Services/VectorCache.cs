@@ -33,8 +33,10 @@ public sealed class VectorCache
             var target = Interlocked.Read(ref _version);
             if (target == _loadedVersion) return _items;
 
+            var epoch = DateTimeOffset.UnixEpoch;
             var rows = await db.PostEmbeddings
                 .AsNoTracking()
+                .Where(e => e.EmbeddedAt > epoch)   // skip failed-attempt rows (no vector yet)
                 .Select(e => new { e.PostId, e.Post.V2exId, e.Post.Published, e.Model, e.Dim, e.Vector })
                 .ToListAsync(ct);
 

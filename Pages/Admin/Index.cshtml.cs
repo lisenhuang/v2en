@@ -38,7 +38,8 @@ public class IndexModel : PageModel
         Translated = await _db.Posts.CountAsync(p => p.Status == TranslationStatus.Translated, ct);
         Failed = await _db.Posts.CountAsync(p => p.Status == TranslationStatus.Failed, ct);
         Total = await _db.Posts.CountAsync(ct);
-        Embedded = await _db.PostEmbeddings.CountAsync(ct);
+        var embEpoch = DateTimeOffset.UnixEpoch;
+        Embedded = await _db.PostEmbeddings.CountAsync(e => e.EmbeddedAt > embEpoch, ct);
 
         State = await _db.FeedStates.AsNoTracking().FirstOrDefaultAsync(s => s.Id == 1, ct) ?? new FeedState { Id = 1 };
         Cfg = await _settings.GetAsync(ct);

@@ -56,12 +56,16 @@ public class RetrievalService
 
         var cutoffTicks = CutoffTicks(window);
         var vectors = await _cache.GetAsync(_db, ct);
+        var qLen = q.Vector.Length;
 
-        // Only compare vectors in the SAME space as the query (same model + dim).
+        // Only compare vectors in the SAME space as the query: same model and same ACTUAL length
+        // (a model may not honor outputDimensionality, so compare the real vector length, not the
+        // configured dim — otherwise every document gets filtered out).
         var scored = new List<(int PostId, double Score)>();
         foreach (var v in vectors)
         {
-            if (v.Dim != dim || !string.Equals(v.Model, model, StringComparison.OrdinalIgnoreCase)) continue;
+            if (!string.Equals(v.Model, model, StringComparison.OrdinalIgnoreCase)) continue;
+            if (v.Vector.Length != qLen) continue;
             if (v.PublishedUtcTicks < cutoffTicks) continue;
             scored.Add((v.PostId, VectorBytes.Dot(q.Vector, v.Vector)));
         }

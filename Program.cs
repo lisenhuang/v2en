@@ -307,6 +307,7 @@ app.MapPost("/api/chat", async (
         Message = result.Success
             ? $"Answered a question ({contextPosts.Count} source(s), {window})."
             : $"Chat failed: {result.Error}",
+        Detail = result.Success ? null : result.Detail,   // raw Google reason (never the visitor's key)
     });
     await db.SaveChangesAsync(ct);
 

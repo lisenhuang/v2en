@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
+using Microsoft.EntityFrameworkCore;
 using v2en.Data;
 using v2en.Services;
 
@@ -11,14 +12,16 @@ public class SettingsModel : PageModel
     private readonly RuntimeSettingsService _settings;
     private readonly OpenRouterModelsService _orModels;
     private readonly GeminiModelsService _gModels;
+    private readonly VectorCache _vectorCache;
 
     public SettingsModel(AppDbContext db, RuntimeSettingsService settings,
-        OpenRouterModelsService orModels, GeminiModelsService gModels)
+        OpenRouterModelsService orModels, GeminiModelsService gModels, VectorCache vectorCache)
     {
         _db = db;
         _settings = settings;
         _orModels = orModels;
         _gModels = gModels;
+        _vectorCache = vectorCache;
     }
 
     // ── Translation (OpenRouter) ──
@@ -55,6 +58,8 @@ public class SettingsModel : PageModel
     public IReadOnlyList<GeminiModel> ChatModelOptions { get; private set; } = Array.Empty<GeminiModel>();
     public bool OpenRouterKeySet { get; private set; }
     public int GeminiKeyCount { get; private set; }
+    public int EmbeddedCount { get; private set; }
+    public bool EmbeddingLocked => EmbeddedCount > 0;  // model/dim fixed once posts are indexed
     public bool Saved { get; set; }
     public string? Error { get; set; }
 
@@ -95,9 +100,15 @@ public class SettingsModel : PageModel
             cfg.GeminiEmbedKeysJson = RuntimeSettingsService.SerializeEmbedKeys(keys);
         }
 
-        // Embedding.
-        cfg.EmbeddingModel = (EmbeddingModel ?? "").Trim();
-        cfg.EmbeddingDim = Math.Clamp(EmbeddingDim, 128, 3072);
+        // Embedding. The model + dimensions define the vector space, so once any post is indexed
+        // they are LOCKED (changing them would make existing vectors uncomparable). Use "Clear
+        // index" to change. EmbedMaxPerTick/Attempts are always safe to change.
+        var epoch = DateTimeOffset.UnixEpoch;
+        if (await _db.PostEmbeddings.AnyAsync(e => e.EmbeddedAt > epoch, ct) == false)
+        {
+            cfg.EmbeddingModel = (EmbeddingModel ?? "").Trim();
+            cfg.EmbeddingDim = Math.Clamp(EmbeddingDim, 128, 3072);
+        }
         cfg.EmbedMaxPerTick = Math.Clamp(EmbedMaxPerTick, 1, 200);
         cfg.EmbedMaxAttempts = Math.Clamp(EmbedMaxAttempts, 1, 20);
 
@@ -145,10 +156,19 @@ public class SettingsModel : PageModel
         GeminiEmbedKeysText = null;
     }
 
+    public async Task<IActionResult> OnPostClearIndexAsync(CancellationToken ct)
+    {
+        await _db.PostEmbeddings.ExecuteDeleteAsync(ct);
+        _vectorCache.Invalidate();
+        return RedirectToPage();
+    }
+
     private async Task LoadDisplayAsync(RuntimeSettings cfg, CancellationToken ct)
     {
         OpenRouterKeySet = !string.IsNullOrWhiteSpace(cfg.OpenRouterApiKey);
         GeminiKeyCount = RuntimeSettingsService.ParseEmbedKeys(cfg).Count;
+        var embEpoch = DateTimeOffset.UnixEpoch;
+        EmbeddedCount = await _db.PostEmbeddings.CountAsync(e => e.EmbeddedAt > embEpoch, ct);
 
         FreeModels = await _orModels.GetFreeModelsAsync(cfg.OpenRouterApiKey, ct);
 
