@@ -249,7 +249,7 @@ app.MapGet("/index.xml", async (
     return Results.Content(xml, "application/atom+xml;charset=UTF-8");
 });
 
-// ── Public "ask the feed" chat: retrieve over post embeddings, answer with the VISITOR's key ──
+// ── Public "ask the feed" chat: embed the query, retrieve, and answer — all with the VISITOR's key ──
 app.MapPost("/api/chat", async (
     ChatRequest req,
     RuntimeSettingsService settingsSvc,
@@ -282,12 +282,16 @@ app.MapPost("/api/chat", async (
         return Results.Json(new { error = "You're asking too fast — wait a minute and try again." }, statusCode: 429);
     cache.Set(bucket, used + 1, TimeSpan.FromMinutes(1));
 
-    var embedKeys = RuntimeSettingsService.ParseEmbedKeys(cfg);
-    if (embedKeys.Count == 0 || string.IsNullOrWhiteSpace(cfg.EmbeddingModel))
+    if (string.IsNullOrWhiteSpace(cfg.EmbeddingModel))
         return Results.Json(new { error = "Search isn't available right now." }, statusCode: 503);
 
     var window = RetrievalService.ParseWindow(req.Window);
-    var search = await retrieval.SearchAsync(question, cfg.EmbeddingModel, cfg.EmbeddingDim, window, cfg.RetrievalTopK, embedKeys, ct);
+    // Embed the visitor's query with the VISITOR's own key — same model/dim as the stored post
+    // vectors, so the query still lands in the same vector space (the key only authenticates/bills
+    // the call, it doesn't change the embedding). The server-side key pool remains in use by the
+    // ingestion job to embed posts; only this per-question query embedding is charged to the visitor.
+    var queryKeys = new[] { req.ApiKey! };
+    var search = await retrieval.SearchAsync(question, cfg.EmbeddingModel, cfg.EmbeddingDim, window, cfg.RetrievalTopK, queryKeys, ct);
     if (search.Error is not null)
         return Results.Json(new { error = search.Error }, statusCode: 503);
     if (search.Hits.Count == 0)
