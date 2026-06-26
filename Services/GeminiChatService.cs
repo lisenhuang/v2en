@@ -1,6 +1,7 @@
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace v2en.Services;
 
@@ -107,7 +108,8 @@ public class GeminiChatService
                 if (string.IsNullOrWhiteSpace(gen.Text))
                     return new ChatResult(false, null, sources, gen.Status,
                         "The model returned no answer (it may have been blocked by a safety filter). Try rephrasing.");
-                return new ChatResult(true, gen.Text, sources, gen.Status, null);
+                // List only the posts the answer actually cited, not the whole retrieval context.
+                return new ChatResult(true, gen.Text, FilterCitedSources(gen.Text, sources), gen.Status, null);
             }
 
             // Echo the model's function-call turn back verbatim, then append our function results.
@@ -252,6 +254,26 @@ public class GeminiChatService
             }
         }
         return (sb.Length == 0 ? null : sb.ToString(), calls);
+    }
+
+    /// <summary>
+    /// The answer cites posts with [#n] markers (n is the 1-based index into the context, the same
+    /// numbering used to build <see cref="sources"/>). Return only the cited posts — in first-cited
+    /// order — so the "Sources" list reflects what the answer actually used instead of the entire
+    /// retrieval set. Falls back to all sources when the model wrote no markers, preserving attribution.
+    /// </summary>
+    private static IReadOnlyList<ChatSource> FilterCitedSources(string answer, IReadOnlyList<ChatSource> sources)
+    {
+        if (string.IsNullOrEmpty(answer) || sources.Count == 0) return sources;
+
+        var cited = new List<ChatSource>();
+        var seen = new HashSet<int>();
+        foreach (Match m in Regex.Matches(answer, @"\[#(\d+)\]"))
+        {
+            if (int.TryParse(m.Groups[1].Value, out var n) && n >= 1 && n <= sources.Count && seen.Add(n))
+                cited.Add(sources[n - 1]);
+        }
+        return cited.Count > 0 ? cited : sources;
     }
 
     private static string Clip(string s) => string.IsNullOrEmpty(s) || s.Length <= 2000 ? s : s[..2000];
