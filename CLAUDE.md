@@ -1,5 +1,16 @@
 # Project Guidelines
 
+## Version stamp — bump it on every code change
+
+The home page shows a build/version stamp from `AppVersion.Stamp` (in `AppVersion.cs`),
+formatted `yy.MM.dd.HH:mm` in **UTC (timezone 0)**, e.g. `26.06.26.09:47`.
+
+- **Every time you modify code, update `AppVersion.Stamp` to the current real UTC time.**
+- **Get the real time from the internet — do NOT guess or use the local clock.** A reliable
+  way is to read an HTTP `Date:` header (it's GMT/UTC), e.g.
+  `curl -sI https://www.google.com | grep -i '^date:'`, then format it as `yy.MM.dd.HH:mm`.
+- This is part of finishing a change, like building — do it before you hand off.
+
 ## Git
 
 - **Do NOT run `git commit` automatically.** Committing is the human's job.
