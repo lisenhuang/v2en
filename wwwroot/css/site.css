@@ -333,6 +333,12 @@ main.container { flex: 1 0 auto; padding-top: 24px; padding-bottom: 48px; }
     font-weight: 700; color: var(--text-muted); margin-right: 8px;
 }
 .live-you .live-log-who { color: var(--accent); }
+.live-link .live-log-who { color: var(--accent); }
+.live-link-a {
+    color: var(--accent); font-weight: 600; text-decoration: underline;
+    text-underline-offset: 2px; word-break: break-all;
+}
+.live-link-a:hover { text-decoration: none; }
 
 /* nav link */
 .nav-link { color: var(--text-muted); font-weight: 500; }

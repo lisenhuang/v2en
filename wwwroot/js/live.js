@@ -29,9 +29,13 @@
     var GROUND_PROMPT =
         "You are a friendly voice assistant for an English-language mirror of the Chinese tech forum " +
         "V2EX. Whenever the user asks about posts, discussions, news, opinions, or topics, you MUST call " +
-        "the search_v2ex_posts function first and base your answer ONLY on the posts it returns, citing " +
-        "them by title. If it returns no posts, say you couldn't find any in the feed. For small talk you " +
-        "may answer directly. Keep replies concise and conversational, and always speak in English.";
+        "the search_v2ex_posts function first and base your answer on the posts it returns, citing them " +
+        "by title. To read a full post or what people replied/commented, call get_post_details with the " +
+        "post's id; its replies come back in the original Chinese — read them but ALWAYS reply in English. " +
+        "When the user asks for a post's link, call show_post_link so a clickable link appears on the page; " +
+        "only ever share links to this mirror, never a v2ex.com address. If search returns no posts, say " +
+        "you couldn't find any in the feed. For small talk you may answer directly. Keep replies concise " +
+        "and conversational, and ALWAYS speak in English regardless of the language of the posts or replies.";
     var SEARCH_DECL = {
         name: "search_v2ex_posts",
         description: "Search the English V2EX post feed for posts relevant to the user's question. " +
@@ -40,6 +44,31 @@
             type: "object",
             properties: { query: { type: "string", description: "The search query, in English." } },
             required: ["query"]
+        }
+    };
+    var DETAILS_DECL = {
+        name: "get_post_details",
+        description: "Fetch the FULL original text of one post plus its discussion replies (replies are " +
+            "in the original Chinese). Call this when the user wants the full post or what people " +
+            "replied/commented. Pass the post's numeric id from the search results.",
+        parameters: {
+            type: "object",
+            properties: { v2ex_id: { type: "integer", description: "The numeric post id, e.g. 1222343." } },
+            required: ["v2ex_id"]
+        }
+    };
+    var LINK_DECL = {
+        name: "show_post_link",
+        description: "Display a clickable link to a post ON THE PAGE for the user — a link to this site's " +
+            "own mirror page. Call this whenever the user asks for the link or URL of a post. Never read a " +
+            "v2ex.com URL aloud; use this instead.",
+        parameters: {
+            type: "object",
+            properties: {
+                v2ex_id: { type: "integer", description: "The numeric post id, e.g. 1222343." },
+                title: { type: "string", description: "The post title to use as the link text." }
+            },
+            required: ["v2ex_id"]
         }
     };
 
@@ -169,6 +198,28 @@
         var last = logEl.lastElementChild;
         if (last) last.setAttribute("data-open", "0");
     }
+    // Render a clickable link line. href is a validated relative mirror path (/t/<id>); title is set
+    // via textContent, so neither the model-supplied title nor the id can inject markup.
+    function logLink(title, href) {
+        closeLogLines();
+        var el = document.createElement("div");
+        el.className = "live-log-line live-link";
+        el.setAttribute("data-role", "link");
+        el.setAttribute("data-open", "0");
+        var who = document.createElement("span");
+        who.className = "live-log-who";
+        who.textContent = "Link";
+        var a = document.createElement("a");
+        a.className = "live-log-text live-link-a";
+        a.href = href;
+        a.target = "_blank";
+        a.rel = "noopener";
+        a.textContent = title;
+        el.appendChild(who);
+        el.appendChild(a);
+        logEl.appendChild(el);
+        logEl.scrollTop = logEl.scrollHeight;
+    }
 
     // ── base64 <-> PCM helpers ──────────────────────────────────────────────────────────────
     function b64ToInt16(b64) {
@@ -221,37 +272,90 @@
         setStatus("speaking", "Speaking");
     }
 
-    function sendToolResponse(fc, posts) {
-        var result = posts && posts.length
-            ? posts.map(function (p, i) {
-                return "[#" + (i + 1) + "] " + p.title + "\n" + (p.url || "") + "\n" + (p.snippet || "");
-            }).join("\n\n")
-            : "No matching posts were found in the feed.";
+    // Low-level: hand a single text result back to Gemini for a given function call.
+    function sendToolResult(fc, resultText) {
         try {
             ws.send(JSON.stringify({
-                toolResponse: { functionResponses: [{ id: fc.id, name: fc.name, response: { result: result } }] }
+                toolResponse: { functionResponses: [{ id: fc.id, name: fc.name, response: { result: resultText } }] }
             }));
         } catch (e) { }
+    }
+
+    // search_v2ex_posts → RAG over the feed. We give the model each post's numeric id (so it can call
+    // get_post_details / show_post_link) but NOT the v2ex.com URL (links must stay on our mirror).
+    function handleSearch(fc) {
+        var query = (fc.args && fc.args.query) || "";
+        setStatus("searching", "Searching");
+        caption("Searching the feed…");
+        fetch("/api/live/search", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ question: query, apiKey: keyEl.value.trim(), window: "all" })
+        }).then(function (r) {
+            return r.ok ? r.json() : { posts: [] };
+        }).then(function (data) {
+            if (query) logLine("you", query);
+            closeLogLines();
+            var posts = (data && data.posts) || [];
+            var text = posts.length
+                ? posts.map(function (p, i) {
+                    return "[#" + (i + 1) + "] (id: " + p.id + ") " + p.title + "\n" + (p.snippet || "");
+                }).join("\n\n")
+                : "No matching posts were found in the feed.";
+            sendToolResult(fc, text);
+        }).catch(function () { sendToolResult(fc, "Search failed — try again."); });
+    }
+
+    function parsePostId(args) {
+        var raw = args && (args.v2ex_id != null ? args.v2ex_id : args.id);
+        var id = parseInt(raw, 10);
+        return id > 0 ? id : 0;
+    }
+
+    // get_post_details → full body (from our mirror) + replies (live from V2EX, original Chinese).
+    function handlePostDetails(fc) {
+        var id = parsePostId(fc.args);
+        if (!id) { sendToolResult(fc, "Invalid post id."); return; }
+        setStatus("searching", "Reading post");
+        caption("Reading the full post…");
+        fetch("/api/live/post", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ v2exId: id, apiKey: keyEl.value.trim() })
+        }).then(function (r) {
+            return r.ok ? r.json() : { found: false };
+        }).then(function (d) {
+            closeLogLines();
+            if (!d || !d.found) { sendToolResult(fc, "That post was not found in the mirror."); return; }
+            var text = "Post (id " + d.id + "): " + d.title + "\nMirror link: " + d.localUrl + "\n\nFull body:\n" + (d.body || "(empty)");
+            if (d.replies && d.replies.length) {
+                text += "\n\nReplies (" + d.replies.length + ", original Chinese — answer in English):\n" +
+                    d.replies.map(function (r, i) {
+                        return (i + 1) + ". " + (r.author || "user") + ": " + r.text;
+                    }).join("\n");
+            } else {
+                text += "\n\nReplies: none available.";
+            }
+            sendToolResult(fc, text);
+        }).catch(function () { sendToolResult(fc, "Couldn't load that post."); });
+    }
+
+    // show_post_link → render a clickable mirror link on the page (only our /t/<id>, never v2ex.com).
+    function handleShowLink(fc) {
+        var id = parsePostId(fc.args);
+        if (!id) { sendToolResult(fc, "Invalid post id."); return; }
+        var title = (fc.args && fc.args.title) || ("Open post #" + id);
+        logLink(title, "/t/" + id);
+        sendToolResult(fc, "A clickable link to /t/" + id + " is now shown to the user on the page.");
     }
 
     function handleToolCall(toolCall) {
         var calls = (toolCall && toolCall.functionCalls) || [];
         calls.forEach(function (fc) {
-            if (fc.name !== "search_v2ex_posts") { sendToolResponse(fc, []); return; }
-            var query = (fc.args && fc.args.query) || "";
-            setStatus("searching", "Searching");
-            caption("Searching the feed…");
-            fetch("/api/live/search", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ question: query, apiKey: keyEl.value.trim(), window: "all" })
-            }).then(function (r) {
-                return r.ok ? r.json() : { posts: [] };
-            }).then(function (data) {
-                if (query) logLine("you", query);
-                closeLogLines();
-                sendToolResponse(fc, (data && data.posts) || []);
-            }).catch(function () { sendToolResponse(fc, []); });
+            if (fc.name === "search_v2ex_posts") handleSearch(fc);
+            else if (fc.name === "get_post_details") handlePostDetails(fc);
+            else if (fc.name === "show_post_link") handleShowLink(fc);
+            else sendToolResult(fc, "Unknown function.");
         });
     }
 
@@ -344,7 +448,7 @@
                     model: model.indexOf("models/") === 0 ? model : "models/" + model,
                     generationConfig: { responseModalities: ["AUDIO"] },
                     systemInstruction: { parts: [{ text: GROUND_PROMPT }] },
-                    tools: [{ functionDeclarations: [SEARCH_DECL] }],
+                    tools: [{ functionDeclarations: [SEARCH_DECL, DETAILS_DECL, LINK_DECL] }],
                     inputAudioTranscription: {},
                     outputAudioTranscription: {}
                 }

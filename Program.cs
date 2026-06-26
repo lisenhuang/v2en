@@ -36,6 +36,14 @@ builder.Services.AddHttpClient<V2exFeedClient>((sp, client) =>
     client.DefaultRequestHeaders.UserAgent.TryParseAdd(opts.UserAgent);
 }).AddStandardResilienceHandler();
 
+// ── V2exTopicClient: best-effort, no-token fetch of a topic's replies (legacy public JSON API). ──
+builder.Services.AddHttpClient<V2exTopicClient>((sp, client) =>
+{
+    var opts = sp.GetRequiredService<IOptions<FeedOptions>>().Value;
+    client.BaseAddress = new Uri("https://www.v2ex.com/");
+    client.DefaultRequestHeaders.UserAgent.TryParseAdd(opts.UserAgent);
+}).AddStandardResilienceHandler();
+
 // ── OpenRouter clients: base address only — the API key is read per-request from the DB ──
 // (No AddResilienceHandler for the translator — it has its own model-fallback + 429 handling.)
 static void ConfigureOpenRouterClient(IServiceProvider sp, HttpClient client)
@@ -60,6 +68,7 @@ builder.Services.AddSingleton<VectorCache>();
 builder.Services.AddScoped<RuntimeSettingsService>();
 builder.Services.AddScoped<TranslationService>();
 builder.Services.AddScoped<RetrievalService>();
+builder.Services.AddScoped<PostDetailsService>();
 builder.Services.AddHostedService<FeedWorker>();
 builder.Services.AddMemoryCache();
 
@@ -408,6 +417,44 @@ app.MapPost("/api/live/search", async (
     return Results.Ok(new { posts });
 });
 
+// ── /live voice tool: fetch ONE post's full body (from our mirror) + its replies (live from V2EX). ──
+// Used by the get_post_details function call so the audio assistant can read the original post and the
+// discussion. The shareable link returned is always our own /t/{id} page, never a v2ex.com URL.
+app.MapPost("/api/live/post", async (
+    LivePostRequest req,
+    RuntimeSettingsService settingsSvc,
+    PostDetailsService details,
+    IMemoryCache cache,
+    HttpContext ctx,
+    CancellationToken ct) =>
+{
+    var cfg = await settingsSvc.GetAsync(ct);
+    if (!cfg.EnableChat) return Results.NotFound();
+    if (req.V2exId <= 0) return Results.BadRequest(new { error = "Missing post id." });
+
+    // Per-IP fixed-window limit — a voice turn may open a couple of posts (mirrors the search limit).
+    var ip = ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+    var bucket = $"live_post_rl:{ip}:{DateTimeOffset.UtcNow:yyyyMMddHHmm}";
+    var used = cache.Get<int>(bucket);
+    if (used >= Math.Max(10, cfg.ChatRateLimitPerMinutePerIp * 5))
+        return Results.Json(new { error = "Too many requests — slow down." }, statusCode: 429);
+    cache.Set(bucket, used + 1, TimeSpan.FromMinutes(1));
+
+    var d = await details.GetAsync(req.V2exId, ct);
+    if (!d.Found) return Results.Ok(new { found = false });
+    return Results.Ok(new
+    {
+        found = true,
+        id = d.V2exId,
+        title = d.Title,
+        localUrl = d.LocalUrl,
+        published = d.Published,
+        body = d.Body,
+        repliesAvailable = d.RepliesAvailable,
+        replies = d.Replies.Select(r => new { author = r.Author, text = r.Text, created = r.Created }),
+    });
+});
+
 await app.RunAsync();
 return 0;
 
@@ -449,3 +496,7 @@ record ChatModelsRequest(string? ApiKey);
 
 /// <summary>Body for a /live voice tool-call: a search query + the visitor's own Gemini key.</summary>
 record LiveSearchRequest(string? Question, string? ApiKey, string? Window);
+
+/// <summary>Body for the /live "read this post" tool-call: the numeric V2EX post id. ApiKey is
+/// accepted for symmetry with the other live calls but is not needed (no Gemini call is made).</summary>
+record LivePostRequest(long V2exId, string? ApiKey);
