@@ -1,0 +1,109 @@
+@page
+@model v2en.Pages.Admin.DataModel
+@{
+    ViewData["Title"] = "Data";
+}
+
+<h1>Data</h1>
+<p class="page-sub">Browse the database tables and their rows. This page is <strong>read-only</strong> — secrets (password hashes, API keys) are hidden.</p>
+
+@if (Model.Tables.Count == 0)
+{
+    <div class="card"><p class="empty">No tables found.</p></div>
+}
+else
+{
+    <div class="db-tables" role="tablist" aria-label="Database tables">
+        @foreach (var t in Model.Tables)
+        {
+            var active = string.Equals(t.Name, Model.Table, StringComparison.Ordinal);
+            <a class="db-tab @(active ? "active" : "")" role="tab" aria-selected="@(active ? "true" : "false")"
+               asp-page="/Admin/Data" asp-route-Table="@t.Name" asp-route-P="1">
+                <span class="db-tab-name">@t.Name</span>
+                <span class="db-tab-count">@t.Rows.ToString("N0")</span>
+            </a>
+        }
+    </div>
+
+    <div class="toolbar">
+        <span class="muted nowrap"><strong class="mono">@Model.Table</strong></span>
+        <span class="dot muted">·</span>
+        <span class="muted nowrap">@Model.Columns.Count column@(Model.Columns.Count == 1 ? "" : "s")</span>
+        <span class="spacer"></span>
+        @if (Model.Total > 0)
+        {
+            <span class="muted nowrap">Rows @Model.FirstRow.ToString("N0")–@Model.LastRow.ToString("N0") of @Model.Total.ToString("N0")</span>
+        }
+        else
+        {
+            <span class="muted nowrap">0 rows</span>
+        }
+    </div>
+
+    <div class="card db-card">
+        @if (Model.Rows.Count == 0)
+        {
+            <p class="empty">This table is empty.</p>
+        }
+        else
+        {
+            <div class="db-scroll">
+                <table class="table db-table">
+                    <thead>
+                        <tr>
+                            <th class="db-rownum">#</th>
+                            @foreach (var col in Model.Columns)
+                            {
+                                <th class="nowrap">@col</th>
+                            }
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @{ var rowNum = Model.FirstRow; }
+                        @foreach (var row in Model.Rows)
+                        {
+                            <tr>
+                                <td class="db-rownum muted">@rowNum.ToString("N0")</td>
+                                @foreach (var cell in row)
+                                {
+                                    @if (cell.IsNull)
+                                    {
+                                        <td class="muted db-null">NULL</td>
+                                    }
+                                    else if (cell.Redacted)
+                                    {
+                                        <td class="muted" title="Hidden for security">•••</td>
+                                    }
+                                    else
+                                    {
+                                        <td class="mono db-cell" title="@cell.Text">@cell.Text</td>
+                                    }
+                                }
+                            </tr>
+                            rowNum++;
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+
+    @if (Model.TotalPages > 1)
+    {
+        <div class="toolbar">
+            @if (Model.P > 1)
+            {
+                <a class="btn btn-sm" asp-page="/Admin/Data" asp-route-Table="@Model.Table" asp-route-P="1">« First</a>
+                <a class="btn btn-sm" asp-page="/Admin/Data" asp-route-Table="@Model.Table" asp-route-P="@(Model.P - 1)">← Prev</a>
+            }
+            <span class="spacer"></span>
+            <span class="muted nowrap">Page @Model.P of @Model.TotalPages</span>
+            <span class="spacer"></span>
+            @if (Model.P < Model.TotalPages)
+            {
+                <a class="btn btn-sm" asp-page="/Admin/Data" asp-route-Table="@Model.Table" asp-route-P="@(Model.P + 1)">Next →</a>
+                <a class="btn btn-sm" asp-page="/Admin/Data" asp-route-Table="@Model.Table" asp-route-P="@Model.TotalPages">Last »</a>
+            }
+        </div>
+    }
+}

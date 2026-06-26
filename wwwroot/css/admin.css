@@ -148,6 +148,38 @@ details.logdetail pre {
 .nowrap { white-space: nowrap; }
 .empty { text-align: center; color: var(--text-muted); padding: 40px 0; }
 
+/* ---------- Data browser ---------- */
+.db-tables { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
+.db-tab {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 7px 12px; border: 1px solid var(--border); border-radius: 999px;
+    background: var(--card); color: var(--text); font-size: .86rem; font-weight: 600;
+    transition: border-color .12s, background .12s;
+}
+.db-tab:hover { border-color: var(--accent); text-decoration: none; }
+.db-tab.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.db-tab-name { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.db-tab-count {
+    font-size: .74rem; font-weight: 700; padding: 1px 7px; border-radius: 999px;
+    background: var(--bg-elev); color: var(--text-muted);
+}
+.db-tab.active .db-tab-count { background: rgba(255, 255, 255, .25); color: #fff; }
+
+/* Card holds the table flush; the inner wrapper scrolls horizontally for wide tables. */
+.db-card { padding: 0; overflow: hidden; }
+.db-scroll { overflow-x: auto; max-width: 100%; }
+.db-table { font-size: .85rem; }
+.db-table th, .db-table td { padding: 8px 12px; white-space: nowrap; }
+.db-table thead th {
+    position: sticky; top: 0; z-index: 1;
+    background: var(--bg-elev); border-bottom: 1px solid var(--border);
+}
+.db-table tbody tr:nth-child(even) { background: color-mix(in srgb, var(--bg-elev) 45%, transparent); }
+.db-rownum { text-align: right; font-variant-numeric: tabular-nums; font-size: .78rem; }
+/* Long values are clipped to keep rows scannable; hover shows the full value via title. */
+.db-cell { max-width: 460px; overflow: hidden; text-overflow: ellipsis; }
+.db-null { font-size: .72rem; letter-spacing: .04em; opacity: .65; }
+
 @media (max-width: 640px) {
     .admin-topbar-inner { height: auto; flex-wrap: wrap; padding-top: 8px; padding-bottom: 8px; gap: 10px; }
     .admin-nav { order: 3; width: 100%; }
