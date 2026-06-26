@@ -9,6 +9,13 @@ public class FeedOptions
     /// <summary>Poll interval. 300s matches the source's Cache-Control: max-age=300.</summary>
     public int PollIntervalSeconds { get; set; } = 300;
 
+    /// <summary>
+    /// Only posts published within this many hours appear in /index.xml (no count cap — every
+    /// post inside the window is included). Defaults to 24h. Set to 0 (or negative) to disable
+    /// the window and fall back to emitting all translated posts.
+    /// </summary>
+    public int RecentWindowHours { get; set; } = 24;
+
     public string UserAgent { get; set; } = "v2en/1.0 (+https://github.com/v2en; translated RSS mirror)";
 }
 
