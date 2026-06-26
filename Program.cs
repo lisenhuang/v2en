@@ -234,10 +234,22 @@ app.MapRazorPages();
 app.MapGet("/index.xml", async (
     AppDbContext db,
     IOptions<SiteOptions> siteOpts,
+    IOptions<FeedOptions> feedOpts,
     HttpContext ctx) =>
 {
-    var posts = await db.Posts
-        .Where(p => p.Status == TranslationStatus.Translated)
+    var query = db.Posts
+        .Where(p => p.Status == TranslationStatus.Translated);
+
+    // Show every post published within the recent window (default 24h), with NO count cap.
+    // A non-positive window disables the cutoff and emits all translated posts (legacy behavior).
+    var windowHours = feedOpts.Value.RecentWindowHours;
+    if (windowHours > 0)
+    {
+        var cutoff = DateTimeOffset.UtcNow.AddHours(-windowHours);
+        query = query.Where(p => p.Published >= cutoff);
+    }
+
+    var posts = await query
         .OrderByDescending(p => p.Published)
         .AsNoTracking()
         .ToListAsync();
