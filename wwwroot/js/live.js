@@ -84,6 +84,22 @@
         try { localStorage.setItem(MODEL_LS, modelEl.value); } catch (e) { }
     });
 
+    // Choose a sensible default when the visitor hasn't explicitly picked a model: prefer the
+    // newest "Flash" live model (lowest-latency / cheapest tier — e.g. Gemini 3.1 Flash Live
+    // Preview), falling back to the first available. Driven entirely by the live list from the
+    // visitor's own key — no model id is hardcoded.
+    function pickDefaultModel(models) {
+        function ver(m) {
+            var match = (m.id + " " + (m.displayName || "")).match(/(\d+(?:\.\d+)?)/);
+            return match ? parseFloat(match[1]) : 0;
+        }
+        var flash = models.filter(function (m) {
+            return (m.id + " " + (m.displayName || "")).toLowerCase().indexOf("flash") >= 0;
+        });
+        var pool = flash.length ? flash : models;
+        return pool.reduce(function (best, m) { return ver(m) > ver(best) ? m : best; }, pool[0]).id;
+    }
+
     function setModelOptions(models) {
         var want = modelEl.value || savedModel;
         modelEl.innerHTML = "";
@@ -100,6 +116,7 @@
             modelEl.appendChild(o);
         });
         if (want && models.some(function (m) { return m.id === want; })) modelEl.value = want;
+        else modelEl.value = pickDefaultModel(models);   // no explicit choice → newest Flash live model
         modelEl.disabled = false;
         modelEl.title = "Live audio model";
     }

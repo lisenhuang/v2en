@@ -69,6 +69,25 @@
     function persistModel() { try { localStorage.setItem(MODEL_LS, modelEl.value); } catch (e) { } }
     modelEl.addEventListener("change", persistModel);
 
+    // When the visitor hasn't explicitly picked a model, default to the latest Flash-Lite
+    // (cheapest / fastest tier). Returns "" if the key exposes no Flash-Lite model, which keeps
+    // the existing "Default model" (server decides) behavior. No model id is hardcoded.
+    function pickDefaultModel(models) {
+        function ver(m) {
+            var match = (m.id + " " + (m.displayName || "")).match(/(\d+(?:\.\d+)?)/);
+            return match ? parseFloat(match[1]) : 0;
+        }
+        var lite = models.filter(function (m) {
+            var s = (m.id + " " + (m.displayName || "")).toLowerCase().replace(/\s+/g, "");
+            return s.indexOf("flash-lite") >= 0 || s.indexOf("flashlite") >= 0;
+        });
+        if (!lite.length) return "";
+        // Prefer an explicit rolling "latest" alias; otherwise the highest version number.
+        var alias = lite.filter(function (m) { return /latest/i.test(m.id); });
+        var pool = alias.length ? alias : lite;
+        return pool.reduce(function (best, m) { return ver(m) > ver(best) ? m : best; }, pool[0]).id;
+    }
+
     function setModelOptions(models) {
         var want = modelEl.value || savedModel;
         modelEl.innerHTML = "";
@@ -81,6 +100,7 @@
             modelEl.appendChild(o);
         });
         if (want && models.some(function (m) { return m.id === want; })) modelEl.value = want;
+        else modelEl.value = pickDefaultModel(models);   // no explicit choice → latest Flash-Lite
         modelEl.disabled = false;
         modelEl.title = "Chat model";
     }
