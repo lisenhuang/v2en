@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using v2en.Utilities;
 
 namespace v2en.Services;
 
@@ -27,8 +28,11 @@ public class OpenRouterTranslator
     private const string SystemPrompt =
         "You are a professional Chinese-to-English translator for the tech forum V2EX. " +
         "You receive a JSON object {\"title\":\"...\",\"content\":\"...\"} where content is HTML. " +
-        "Translate the Chinese text into natural, fluent English. " +
-        "Respond with ONLY a JSON object of the same shape: {\"title\":\"...\",\"content\":\"...\"}. " +
+        "Translate ALL Chinese text — BOTH the title and the content — into natural, fluent English. " +
+        "Your response MUST be entirely in English: do NOT return any Chinese characters from the source, " +
+        "and never echo the input untranslated. If a field is already English, return it unchanged. " +
+        "Respond with ONLY a JSON object of the same shape: {\"title\":\"...\",\"content\":\"...\"}, with " +
+        "BOTH keys ALWAYS present and fully translated to English. " +
         "In content, preserve every HTML tag, attribute, and URL (href/src) exactly as given; translate only human-readable text. " +
         "Do NOT translate code inside <code>/<pre>, URLs, or usernames. " +
         "Do NOT wrap the JSON in markdown code fences and do NOT add any commentary.";
@@ -149,6 +153,17 @@ public class OpenRouterTranslator
 
                 if (TryParseTranslation(content, out var title, out var html))
                 {
+                    // Reject output the model failed to translate (missing title, or title/body still
+                    // Chinese) so the next model in the chain gets a try — we never store Chinese as
+                    // the "English" version.
+                    if (LooksUntranslated(title, html))
+                    {
+                        lastError = $"Model returned untranslated Chinese on {model}";
+                        _logger.LogWarning("{Error}; trying next model.", lastError);
+                        attempts.Add(new TranslationAttempt(model, status, "untranslated",
+                            "Output still contained Chinese (or had no title); English is required."));
+                        continue;
+                    }
                     attempts.Add(new TranslationAttempt(model, status, "ok", null));
                     return new TranslationOutcome(true, title, html, model, RateLimited: false, null, attempts);
                 }
@@ -200,6 +215,34 @@ public class OpenRouterTranslator
 
     private static string Clip(string s) =>
         string.IsNullOrEmpty(s) ? "" : (s.Length <= 300 ? s : s[..300]);
+
+    /// <summary>
+    /// True when a parsed translation looks like the model did NOT translate to English: the title is
+    /// missing, or the title or the visible body text is still predominantly Chinese/CJK. Conservative
+    /// (≥ half the letters must be CJK) so an English sentence quoting a Chinese term still passes, and
+    /// an empty body is fine (V2EX has title-only posts).
+    /// </summary>
+    private static bool LooksUntranslated(string title, string html)
+    {
+        if (string.IsNullOrWhiteSpace(title)) return true;   // a translated post must have a title
+        if (IsMostlyCjk(title)) return true;                 // title must be English
+        return IsMostlyCjk(HtmlText.Plain(html, 4000));      // body (if any) must be English
+    }
+
+    private static bool IsMostlyCjk(string s)
+    {
+        if (string.IsNullOrEmpty(s)) return false;
+        int cjk = 0, letters = 0;
+        foreach (var ch in s)
+        {
+            if (char.IsLetter(ch)) letters++;
+            if (ch is (>= '一' and <= '鿿')    // CJK ideographs
+                  or (>= '぀' and <= 'ヿ')     // Hiragana + Katakana
+                  or (>= '가' and <= '힯'))    // Hangul
+                cjk++;
+        }
+        return letters > 0 && cjk * 2 >= letters;
+    }
 
     /// <summary>Longer clip for the stored admin log detail (raw AI API error body).</summary>
     private static string? ClipDetail(string? s) =>

@@ -344,9 +344,9 @@ main.container { flex: 1 0 auto; padding-top: 24px; padding-bottom: 48px; }
 .nav-link { color: var(--text-muted); font-weight: 500; }
 .nav-link:hover { color: var(--text); }
 
-/* home-page build/version stamp */
+/* footer build/version stamp */
 .site-version {
-    margin: 28px 0 6px; text-align: center;
+    margin: 6px 0 0;
     font-size: .72rem; letter-spacing: .04em; color: var(--text-muted); opacity: .7;
 }
 
