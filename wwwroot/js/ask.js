@@ -167,8 +167,9 @@
             html += '<div class="ask-sources"><span class="ask-sources-h">Sources</span><ul>';
             sources.forEach(function (s) {
                 var d = new Date(s.published);
+                // Link only to our own mirror page (/t/{id}); the detail page itself links out to
+                // v2ex, so we never surface a v2ex.com URL here.
                 html += "<li><a href=\"/t/" + encodeURIComponent(s.id) + "\" target=\"_blank\" rel=\"noopener\">" + esc(s.title) + "</a>"
-                    + " <a class=\"ask-src-ext\" href=\"" + esc(s.url) + "\" target=\"_blank\" rel=\"noopener\">v2ex ↗</a>"
                     + " <time datetime=\"" + esc(s.published) + "\">" + (isNaN(d) ? "" : d.toLocaleDateString()) + "</time></li>";
             });
             html += "</ul></div>";
