@@ -7,6 +7,17 @@ namespace v2en.Data;
 /// </summary>
 public class RuntimeSettings
 {
+    /// <summary>
+    /// Built-in default Gemini chat model. Single source of truth so every fallback/seed path
+    /// agrees. Changing this updates new installs; the live DB row is migrated forward at startup
+    /// only when it still holds the *previous* built-in default (see Program.cs), so a deliberate
+    /// admin choice is preserved.
+    /// </summary>
+    public const string DefaultChatModel = "gemini-3-flash-preview";
+
+    /// <summary>The previous built-in default, kept so startup can migrate it forward exactly once.</summary>
+    public const string LegacyDefaultChatModel = "gemini-2.5-flash";
+
     public int Id { get; set; }
 
     /// <summary>Ordered fallback chain of OpenRouter model ids — MUST be ":free" only. Stored as JSON.</summary>
@@ -58,7 +69,7 @@ public class RuntimeSettings
     public bool EnableChat { get; set; }
 
     /// <summary>Gemini generateContent model used for chat answers (run on the visitor's own key).</summary>
-    public string ChatModel { get; set; } = "gemini-2.5-flash";
+    public string ChatModel { get; set; } = DefaultChatModel;
 
     public int RetrievalTopK { get; set; } = 8;
     public int ChatMaxContextPosts { get; set; } = 8;

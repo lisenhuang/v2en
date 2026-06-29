@@ -162,7 +162,13 @@ using (var scope = app.Services.CreateScope())
     if (cfgRow.RetrievalTopK <= 0) { cfgRow.RetrievalTopK = 8; migrated = true; }
     if (cfgRow.ChatMaxContextPosts <= 0) { cfgRow.ChatMaxContextPosts = 8; migrated = true; }
     if (cfgRow.ChatRateLimitPerMinutePerIp <= 0) { cfgRow.ChatRateLimitPerMinutePerIp = 6; migrated = true; }
-    if (string.IsNullOrWhiteSpace(cfgRow.ChatModel)) { cfgRow.ChatModel = "gemini-2.5-flash"; migrated = true; }
+    // Backfill when unset, and migrate the previous built-in default forward to the current one so
+    // the live site adopts the new default without a manual dashboard edit. A deliberate admin
+    // choice (any value other than the old default) is left untouched.
+    if (string.IsNullOrWhiteSpace(cfgRow.ChatModel) || cfgRow.ChatModel == RuntimeSettings.LegacyDefaultChatModel)
+    {
+        if (cfgRow.ChatModel != RuntimeSettings.DefaultChatModel) { cfgRow.ChatModel = RuntimeSettings.DefaultChatModel; migrated = true; }
+    }
 
     if (migrated)
     {

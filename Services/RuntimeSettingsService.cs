@@ -51,7 +51,7 @@ public class RuntimeSettingsService
             GeminiEmbedKeysJson = SerializeEmbedKeys(_g.EmbedKeys),
             EmbeddingModel = _g.EmbeddingModel,
             EmbeddingDim = _g.EmbeddingDim,
-            ChatModel = string.IsNullOrWhiteSpace(_g.ChatModel) ? "gemini-2.5-flash" : _g.ChatModel,
+            ChatModel = string.IsNullOrWhiteSpace(_g.ChatModel) ? RuntimeSettings.DefaultChatModel : _g.ChatModel,
             UpdatedUtc = DateTimeOffset.UtcNow,
         };
         _db.RuntimeSettings.Add(s);
