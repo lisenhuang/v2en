@@ -11,6 +11,27 @@ public record GeminiModel(string Id, string DisplayName, IReadOnlyList<string> M
     public bool SupportsGenerate => Methods.Any(m => m.Equals("generateContent", StringComparison.OrdinalIgnoreCase));
     // Live / real-time audio models expose the bidirectional streaming method.
     public bool SupportsLive => Methods.Any(m => m.Equals("bidiGenerateContent", StringComparison.OrdinalIgnoreCase));
+
+    // A handful of generateContent models emit images / audio / video instead of chat text
+    // (image generation, text-to-speech, video). The "ask the feed" chat only consumes text, so
+    // those must be kept out of the chat-model list even though they technically support generateContent.
+    public bool IsTextGeneration => SupportsGenerate && !LooksNonTextGeneration;
+
+    private bool LooksNonTextGeneration
+    {
+        get
+        {
+            var s = (Id + " " + DisplayName).ToLowerInvariant();
+            return s.Contains("image")
+                || s.Contains("imagen")
+                || s.Contains("tts")
+                || s.Contains("text-to-speech")
+                || s.Contains("native-audio")
+                || s.Contains("audio")
+                || s.Contains("veo")
+                || s.Contains("video");
+        }
+    }
 }
 
 public record GeminiModelLists(
@@ -95,7 +116,7 @@ public class GeminiModelsService
 
             return new GeminiModelLists(
                 Embedding: all.Where(m => m.SupportsEmbedding).OrderBy(m => m.Id).ToList(),
-                Chat: all.Where(m => m.SupportsGenerate).OrderBy(m => m.Id).ToList(),
+                Chat: all.Where(m => m.IsTextGeneration).OrderBy(m => m.Id).ToList(),
                 Live: all.Where(m => m.SupportsLive).OrderBy(m => m.Id).ToList());
         }
         catch (Exception ex)

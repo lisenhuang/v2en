@@ -114,7 +114,7 @@ public class SettingsModel : PageModel
 
         // Chat / retrieval.
         cfg.EnableChat = EnableChat;
-        cfg.ChatModel = string.IsNullOrWhiteSpace(ChatModel) ? "gemini-2.5-flash" : ChatModel.Trim();
+        cfg.ChatModel = string.IsNullOrWhiteSpace(ChatModel) ? RuntimeSettings.DefaultChatModel : ChatModel.Trim();
         cfg.RetrievalTopK = Math.Clamp(RetrievalTopK, 1, 50);
         cfg.ChatMaxContextPosts = Math.Clamp(ChatMaxContextPosts, 1, 30);
         cfg.ChatRateLimitPerMinutePerIp = Math.Clamp(ChatRateLimitPerMinutePerIp, 1, 120);
