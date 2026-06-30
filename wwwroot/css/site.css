@@ -100,9 +100,19 @@ a:hover { color: var(--link-hover); text-decoration: underline; }
     cursor: pointer; font-size: 1.1rem; line-height: 1; transition: background .15s, border-color .15s;
 }
 .theme-toggle:hover { border-color: var(--accent); }
-.theme-icon::before { content: "🌙"; }
-:root[data-theme="dark"] .theme-icon::before { content: "☀️"; }
-@media (prefers-color-scheme: dark) { :root:not([data-theme]) .theme-icon::before { content: "☀️"; } }
+.theme-toggle .icon { width: 19px; height: 19px; }
+
+/* Inline SVG icons (see Utilities/Icons.cs): inherit text color, scale with font-size. */
+.icon { width: 1.1em; height: 1.1em; display: inline-block; vertical-align: -0.18em; flex: none; }
+
+/* Theme toggle shows the moon in light mode (tap → dark) and the sun in dark mode. */
+.theme-icon-sun { display: none; }
+:root[data-theme="dark"] .theme-icon-moon { display: none; }
+:root[data-theme="dark"] .theme-icon-sun { display: inline-block; }
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme]) .theme-icon-moon { display: none; }
+    :root:not([data-theme]) .theme-icon-sun { display: inline-block; }
+}
 
 /* ---------- Main / footer ---------- */
 main.container { flex: 1 0 auto; padding-top: 24px; padding-bottom: 48px; }
@@ -207,7 +217,9 @@ main.container { flex: 1 0 auto; padding-top: 24px; padding-bottom: 48px; }
 }
 .ask-settings-btn:hover { border-color: var(--accent); }
 .ask-settings-btn.is-open { border-color: var(--accent); color: var(--accent); }
-.ask-gear { font-size: 1rem; line-height: 1; }
+.ask-gear { width: 16px; height: 16px; }
+/* lock glyph in the privacy hint sits slightly muted, aligned to the text */
+.ask-bar-hint .icon { width: 14px; height: 14px; vertical-align: -0.13em; opacity: .85; }
 .ask-key-dot {
     width: 8px; height: 8px; border-radius: 50%; background: var(--text-muted); opacity: .5;
 }
@@ -316,7 +328,7 @@ main.container { flex: 1 0 auto; padding-top: 24px; padding-bottom: 48px; }
 }
 .live-mic:hover { filter: brightness(1.06); }
 .live-mic.is-live { background: #dc2626; box-shadow: 0 8px 24px color-mix(in srgb, #dc2626 35%, transparent); }
-.live-mic-icon { font-size: 2.3rem; line-height: 1; }
+.live-mic-icon { width: 40px; height: 40px; }
 .live-mic-ring { position: absolute; inset: -3px; border-radius: 50%; border: 3px solid #dc2626; opacity: 0; }
 .live-mic.is-live .live-mic-ring { animation: livepulse 1.5s ease-out infinite; }
 @keyframes livepulse { 0% { transform: scale(1); opacity: .55; } 100% { transform: scale(1.65); opacity: 0; } }
