@@ -155,12 +155,12 @@
             {
                 <div class="field">
                     <label>Embedding model</label>
-                    <p class="hint">🔒 Locked — <strong>@Model.EmbeddedCount</strong> post(s) indexed.</p>
+                    <p class="hint">@Icons.Svg("lock", "icon") Locked — <strong>@Model.EmbeddedCount</strong> post(s) indexed.</p>
                     <input type="text" value="@Model.EmbeddingModel" readonly disabled />
                 </div>
                 <div class="field">
                     <label>Dimensions</label>
-                    <p class="hint">🔒 Locked so the query and stored vectors stay comparable.</p>
+                    <p class="hint">@Icons.Svg("lock", "icon") Locked so the query and stored vectors stay comparable.</p>
                     <input type="text" value="@Model.EmbeddingDim" readonly disabled />
                 </div>
             }

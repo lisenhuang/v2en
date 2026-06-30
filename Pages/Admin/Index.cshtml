@@ -184,7 +184,7 @@ else if (!Model.Cfg.EnableChat)
     </div>
     @if (Model.RecentIssues.Count == 0)
     {
-        <p class="empty">No warnings or errors recorded. 🎉</p>
+        <p class="empty">@Icons.Svg("check", "icon") No warnings or errors recorded.</p>
     }
     else
     {

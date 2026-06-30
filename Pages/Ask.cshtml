@@ -9,7 +9,7 @@
 {
     <div class="ask-app">
         <div class="ask-card ask-disabled">
-            <p>💤 The chat isn't available right now. Please check back later.</p>
+            <p>@Icons.Svg("clock", "icon") The chat isn't available right now. Please check back later.</p>
         </div>
     </div>
 }
@@ -25,7 +25,7 @@ else
             <div class="ask-toolbar">
                 <button type="button" class="ask-settings-btn" id="ask-settings-btn"
                         aria-expanded="false" aria-controls="ask-settings" title="Key &amp; model settings">
-                    <span class="ask-gear" aria-hidden="true">⚙</span><span class="ask-settings-text">Settings</span>
+                    @Icons.Svg("settings", "icon ask-gear")<span class="ask-settings-text">Settings</span>
                     <span class="ask-key-dot" id="ask-key-dot" title="No key set"></span>
                 </button>
                 <span class="ask-toolbar-spacer"></span>
@@ -50,7 +50,7 @@ else
                     </select>
                 </div>
                 <p class="ask-bar-hint">
-                    🔒 Used to search and answer on your behalf — never stored.
+                    @Icons.Svg("lock", "icon") Used to search and answer on your behalf — never stored.
                     <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Get a free key →</a>
                 </p>
             </div>

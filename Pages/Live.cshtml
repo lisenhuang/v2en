@@ -9,7 +9,7 @@
 {
     <div class="ask-app">
         <div class="ask-card ask-disabled">
-            <p>💤 Live voice chat isn't available right now. Please check back later.</p>
+            <p>@Icons.Svg("clock", "icon") Live voice chat isn't available right now. Please check back later.</p>
         </div>
     </div>
 }
@@ -25,7 +25,7 @@ else
             <div class="ask-toolbar">
                 <button type="button" class="ask-settings-btn" id="ask-settings-btn"
                         aria-expanded="false" aria-controls="ask-settings" title="Key &amp; model settings">
-                    <span class="ask-gear" aria-hidden="true">⚙</span><span class="ask-settings-text">Settings</span>
+                    @Icons.Svg("settings", "icon ask-gear")<span class="ask-settings-text">Settings</span>
                     <span class="ask-key-dot" id="ask-key-dot" title="No key set"></span>
                 </button>
                 <span class="ask-toolbar-spacer"></span>
@@ -45,14 +45,14 @@ else
                     </select>
                 </div>
                 <p class="ask-bar-hint">
-                    🔒 Connects directly from your browser to Google with your key — never sent to or stored on this server.
+                    @Icons.Svg("lock", "icon") Connects directly from your browser to Google with your key — never sent to or stored on this server.
                     <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Get a free key →</a>
                 </p>
             </div>
 
             <div class="live-stage">
                 <button type="button" class="live-mic" id="live-mic" aria-label="Start talking">
-                    <span class="live-mic-icon" aria-hidden="true">🎙️</span>
+                    @Icons.Svg("mic", "icon live-mic-icon")
                     <span class="live-mic-ring"></span>
                 </button>
                 <p class="live-caption" id="live-caption">Tap the mic and ask about the feed</p>
