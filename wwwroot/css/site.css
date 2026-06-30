@@ -357,12 +357,22 @@ main.container { flex: 1 0 auto; padding-top: 24px; padding-bottom: 48px; }
     .brand-text { font-size: 1rem; }
     .ask-bubble { max-width: 92%; }
 
-    /* Ask page becomes a full-screen chat app: no surrounding box, fills the viewport,
-       thread scrolls internally, composer pinned to the bottom — and, when the on-screen
-       keyboard opens, sitting right on top of it. --ask-app-h is driven from
-       window.visualViewport in ask.js (iOS Safari doesn't shrink the layout viewport for
-       the keyboard); the calc() fallback covers first paint / no-JS. */
-    main.container:has(.ask-app) { padding: 0; height: var(--ask-app-h, calc(100dvh - 61px)); overflow: hidden; }
+    /* Ask page becomes a full-screen chat app: no surrounding box, thread scrolls
+       internally, composer pinned to the bottom — and, when the on-screen keyboard opens,
+       sitting right on top of it.
+
+       The chat is anchored to the *visual* viewport with position:fixed, not laid out in
+       normal flow. On iOS Safari the keyboard doesn't shrink the layout viewport; it
+       scrolls the page up to reveal the focused field, which would push a flow-positioned
+       composer off the top of the screen. Pinning the chat to the visible region and
+       driving --ask-top / --ask-h from window.visualViewport in ask.js keeps it re-covering
+       exactly the area above the keyboard. The fallbacks cover first paint / no-JS. */
+    main.container:has(.ask-app) {
+        position: fixed; left: 0; right: 0;
+        top: var(--ask-top, 61px);
+        height: var(--ask-h, calc(100dvh - 61px));
+        padding: 0; overflow: hidden;
+    }
     body:has(.ask-app) { overflow: hidden; }
     body:has(.ask-app) .site-footer { display: none; }
     .ask-app { display: flex; flex-direction: column; height: 100%; min-height: 0; }
