@@ -127,16 +127,25 @@
     if (keyEl.value.trim()) loadModels();
 
     // ── Keep the composer pinned right on top of the on-screen keyboard (mobile) ──────────
-    // iOS Safari keeps the layout viewport (and 100dvh) full-height when the keyboard opens,
-    // so a bottom-pinned composer would hide behind it. Drive the chat height from the
-    // visualViewport instead: its height is the actually-visible area above the keyboard.
-    // (Chrome handles this natively via the viewport's interactive-widget=resizes-content.)
+    // The chat is a position:fixed overlay (see site.css). iOS Safari doesn't shrink the
+    // layout viewport when the keyboard opens — it scrolls the page up to reveal the focused
+    // field, which would shove a flow-positioned composer off the top of the screen (the bug
+    // this fixes). window.visualViewport tells us the actually-visible region above the
+    // keyboard; we re-anchor the overlay to it on every resize/scroll so the composer always
+    // rides on top of the keyboard. (Chrome resizes content natively via the viewport's
+    // interactive-widget=resizes-content, and stays consistent with the same math.)
     var HEADER_H = 61; // matches the .site-header height reserved in site.css
     var vv = window.visualViewport;
     if (vv) {
         var root = document.documentElement;
         var syncViewport = function () {
-            root.style.setProperty("--ask-app-h", Math.max(0, Math.round(vv.height - HEADER_H)) + "px");
+            // Visible region in layout coords is [offsetTop, offsetTop + height]. Keep the
+            // header visible while any of it is on screen, otherwise butt the chat against
+            // the top of the visible area (e.g. once the page has scrolled the header away).
+            var top = Math.max(HEADER_H, vv.offsetTop);
+            var height = (vv.offsetTop + vv.height) - top;
+            root.style.setProperty("--ask-top", Math.round(top) + "px");
+            root.style.setProperty("--ask-h", Math.max(0, Math.round(height)) + "px");
         };
         syncViewport();
         vv.addEventListener("resize", syncViewport);
