@@ -358,8 +358,12 @@ main.container { flex: 1 0 auto; padding-top: 24px; padding-bottom: 48px; }
     .ask-bubble { max-width: 92%; }
 
     /* Ask page becomes a full-screen chat app: no surrounding box, fills the viewport,
-       thread scrolls internally, composer pinned to the bottom. */
-    main.container:has(.ask-app) { padding: 0; height: calc(100dvh - 61px); overflow: hidden; }
+       thread scrolls internally, composer pinned to the bottom — and, when the on-screen
+       keyboard opens, sitting right on top of it. --ask-app-h is driven from
+       window.visualViewport in ask.js (iOS Safari doesn't shrink the layout viewport for
+       the keyboard); the calc() fallback covers first paint / no-JS. */
+    main.container:has(.ask-app) { padding: 0; height: var(--ask-app-h, calc(100dvh - 61px)); overflow: hidden; }
+    body:has(.ask-app) { overflow: hidden; }
     body:has(.ask-app) .site-footer { display: none; }
     .ask-app { display: flex; flex-direction: column; height: 100%; min-height: 0; }
     .ask-intro, .ask-foot { display: none; }
@@ -368,9 +372,13 @@ main.container { flex: 1 0 auto; padding-top: 24px; padding-bottom: 48px; }
         border: none; border-radius: 0; box-shadow: none; background: var(--card);
     }
     .ask-thread { flex: 1; min-height: 0; max-height: none; padding: 14px; }
-    .ask-composer { padding: 10px 12px; gap: 8px; }
+    /* composer pinned to the bottom; keep clear of the home-bar safe area */
+    .ask-composer { padding: 10px 12px; gap: 8px; padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px)); }
     .ask-composer textarea { min-height: 44px; padding: 11px 13px; }
     .ask-send { padding: 11px 16px; }
+
+    /* 16px keeps iOS Safari from auto-zooming the page when a field gains focus */
+    .ask-card input[type="password"], .ask-card select, .ask-card textarea { font-size: 16px; }
     .ask-disabled { margin: 24px 16px; }
 
     /* Live page: mic stage fills the screen, transcript caps to the lower third. */
