@@ -126,6 +126,23 @@
     keyEl.addEventListener("change", function () { persistKey(); reflectKey(); loadModels(); });
     if (keyEl.value.trim()) loadModels();
 
+    // ── Keep the composer pinned right on top of the on-screen keyboard (mobile) ──────────
+    // iOS Safari keeps the layout viewport (and 100dvh) full-height when the keyboard opens,
+    // so a bottom-pinned composer would hide behind it. Drive the chat height from the
+    // visualViewport instead: its height is the actually-visible area above the keyboard.
+    // (Chrome handles this natively via the viewport's interactive-widget=resizes-content.)
+    var HEADER_H = 61; // matches the .site-header height reserved in site.css
+    var vv = window.visualViewport;
+    if (vv) {
+        var root = document.documentElement;
+        var syncViewport = function () {
+            root.style.setProperty("--ask-app-h", Math.max(0, Math.round(vv.height - HEADER_H)) + "px");
+        };
+        syncViewport();
+        vv.addEventListener("resize", syncViewport);
+        vv.addEventListener("scroll", syncViewport);
+    }
+
     // ── Composer ─────────────────────────────────────────────────────────────────────────
     document.querySelectorAll(".ask-chip").forEach(function (c) {
         c.addEventListener("click", function () {
@@ -142,6 +159,8 @@
     input.addEventListener("keydown", function (e) {
         if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); form.requestSubmit(); }
     });
+    // Once the keyboard has animated in and the chat resized, keep the latest reply visible.
+    input.addEventListener("focus", function () { setTimeout(scrollDown, 300); });
 
     function esc(s) { var d = document.createElement("div"); d.textContent = s == null ? "" : String(s); return d.innerHTML; }
     function hideEmpty() { if (empty) empty.style.display = "none"; }
