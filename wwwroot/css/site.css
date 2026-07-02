@@ -272,7 +272,28 @@ main.container { flex: 1 0 auto; padding-top: 24px; padding-bottom: 48px; }
     background: var(--bg-elev); border: 1px solid var(--border); border-bottom-left-radius: 5px;
 }
 .ask-error .ask-bubble { background: color-mix(in srgb, #dc2626 12%, var(--bg-elev)); border-color: color-mix(in srgb, #dc2626 35%, var(--border)); }
-.ask-answer { white-space: pre-wrap; word-wrap: break-word; overflow-wrap: anywhere; }
+/* Markdown-rendered answer (see mdToHtml in ask.js) */
+.ask-answer { word-wrap: break-word; overflow-wrap: anywhere; }
+.ask-answer p, .ask-answer ul, .ask-answer ol, .ask-answer pre, .ask-answer blockquote,
+.ask-answer h3, .ask-answer h4, .ask-answer h5, .ask-answer h6 { margin: 0 0 10px; }
+.ask-answer > :last-child { margin-bottom: 0; }
+.ask-answer h3, .ask-answer h4, .ask-answer h5, .ask-answer h6 { margin-top: 14px; font-size: 1em; }
+.ask-answer > :first-child { margin-top: 0; }
+.ask-answer ul, .ask-answer ol { padding-left: 22px; }
+.ask-answer li { margin: 4px 0; }
+.ask-answer code {
+    background: color-mix(in srgb, var(--text) 8%, transparent);
+    border-radius: 5px; padding: 1px 5px; font-size: .88em;
+}
+.ask-answer pre {
+    background: color-mix(in srgb, var(--text) 6%, transparent);
+    border: 1px solid var(--border); border-radius: 10px;
+    padding: 10px 12px; overflow-x: auto;
+}
+.ask-answer pre code { background: none; padding: 0; font-size: .85em; }
+.ask-answer blockquote { border-left: 3px solid var(--border); padding-left: 12px; color: var(--text-muted); }
+.ask-answer a { color: var(--link); }
+.ask-answer hr { border: none; border-top: 1px solid var(--border); margin: 12px 0; }
 
 .ask-sources { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); }
 .ask-sources-h { font-size: .72rem; text-transform: uppercase; letter-spacing: .05em; color: var(--text-muted); font-weight: 700; }

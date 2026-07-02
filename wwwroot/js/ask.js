@@ -175,6 +175,76 @@
     function hideEmpty() { if (empty) empty.style.display = "none"; }
     function scrollDown() { thread.scrollTop = thread.scrollHeight; }
 
+    // ── Minimal, safe Markdown → HTML for answers ────────────────────────────────────────
+    // Gemini replies in Markdown (**bold**, "*" bullets, `code`, …) which used to be shown
+    // as raw text. Everything is HTML-escaped FIRST, then a small whitelist of Markdown is
+    // turned into tags, so model output can never inject markup. Links are only linkified
+    // for http(s) and site-relative URLs.
+    function mdInline(s) {
+        // s is already HTML-escaped by the caller
+        s = s.replace(/`([^`]+)`/g, "<code>$1</code>");
+        // no quotes in the URL: esc() leaves " untouched, so this keeps hrefs unbreakable
+        s = s.replace(/\[([^\]]+)\]\(([^()\s"']+)\)/g, function (all, text, url) {
+            if (!/^(https?:\/\/|\/)/i.test(url)) return all;
+            return '<a href="' + url + '" target="_blank" rel="noopener">' + text + "</a>";
+        });
+        s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+        s = s.replace(/__([^_]+)__/g, "<strong>$1</strong>");
+        s = s.replace(/(^|[\s(])\*([^*\s][^*]*)\*/g, "$1<em>$2</em>");
+        s = s.replace(/(^|[\s(])_([^_\s][^_]*)_(?=[\s.,;:!?)]|$)/g, "$1<em>$2</em>");
+        return s;
+    }
+    function mdToHtml(md) {
+        var lines = esc(md).split(/\r?\n/);
+        var out = [], para = [], i = 0, m;
+        function flush() {
+            if (para.length) { out.push("<p>" + para.map(mdInline).join("<br>") + "</p>"); para = []; }
+        }
+        while (i < lines.length) {
+            var line = lines[i];
+            if (/^\s*```/.test(line)) {                                  // fenced code block
+                flush();
+                var code = [];
+                for (i++; i < lines.length && !/^\s*```/.test(lines[i]); i++) code.push(lines[i]);
+                i++;                                                     // skip the closing fence
+                out.push("<pre><code>" + code.join("\n") + "</code></pre>");
+                continue;
+            }
+            if ((m = line.match(/^\s{0,3}(#{1,6})\s+(.+)$/))) {          // heading → h3…h6 in the bubble
+                flush();
+                var lvl = Math.min(6, m[1].length + 2);
+                out.push("<h" + lvl + ">" + mdInline(m[2]) + "</h" + lvl + ">");
+                i++; continue;
+            }
+            if (/^\s{0,3}(?:-{3,}|\*{3,}|_{3,})\s*$/.test(line)) { flush(); out.push("<hr>"); i++; continue; }
+            if (/^\s*[*+-]\s+/.test(line)) {                             // bullet list
+                flush();
+                var ul = [];
+                while (i < lines.length && (m = lines[i].match(/^\s*[*+-]\s+(.*)$/))) { ul.push(m[1]); i++; }
+                out.push("<ul>" + ul.map(function (t) { return "<li>" + mdInline(t) + "</li>"; }).join("") + "</ul>");
+                continue;
+            }
+            if (/^\s*\d+[.)]\s+/.test(line)) {                           // numbered list
+                flush();
+                var ol = [];
+                while (i < lines.length && (m = lines[i].match(/^\s*\d+[.)]\s+(.*)$/))) { ol.push(m[1]); i++; }
+                out.push("<ol>" + ol.map(function (t) { return "<li>" + mdInline(t) + "</li>"; }).join("") + "</ol>");
+                continue;
+            }
+            if (/^\s*&gt;\s?/.test(line)) {                              // blockquote (">" is escaped to &gt;)
+                flush();
+                var q = [];
+                while (i < lines.length && (m = lines[i].match(/^\s*&gt;\s?(.*)$/))) { q.push(m[1]); i++; }
+                out.push("<blockquote>" + q.map(mdInline).join("<br>") + "</blockquote>");
+                continue;
+            }
+            if (/^\s*$/.test(line)) { flush(); i++; continue; }
+            para.push(line); i++;
+        }
+        flush();
+        return out.join("");
+    }
+
     function addUser(text) {
         hideEmpty();
         var el = document.createElement("div");
@@ -190,7 +260,7 @@
         return el;
     }
     function renderAnswer(el, answer, sources) {
-        var html = '<div class="ask-bubble"><div class="ask-answer">' + esc(answer) + "</div>";
+        var html = '<div class="ask-bubble"><div class="ask-answer">' + mdToHtml(answer) + "</div>";
         if (sources && sources.length) {
             html += '<div class="ask-sources"><span class="ask-sources-h">Sources</span><ul>';
             sources.forEach(function (s) {
