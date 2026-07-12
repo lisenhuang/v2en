@@ -8,27 +8,49 @@ All API keys & models are managed in an **admin dashboard** (stored in SQLite). 
 
 ## 🧭 Architecture
 
-```
-                 every 5 min ── FeedWorker (BackgroundService)
-                     │
-        V2exFeed'─── ▼ conditional GET (ETag) ───► V2EX Atom feed
-                     │ upsert by V2exId
-        ┌────────────▼─────────────────────────────────────────┐
-        │                SQLite (EF Core · WAL)                 │
-        │   Post · PostEmbedding · RuntimeSettings · Logs …     │
-        └──┬─────────────┬───────────────┬──────────────┬───────┘
-   translate│       embed │ (all posts)   │ read         │ read
-   OpenRouter│      Gemini │ server keys   │              │
-     :free   ▼       ▼     (pool, rotated) ▼              ▼
-   English title+html   vectors      Razor Pages      GET /index.xml
-                                     / · /t/{id}       Atom 1.0 (EN)
-                                     /ask  ──► POST /api/chat
-                                                 │ retrieve top-K + time filter
-                                                 ▼ Gemini generateContent
-                                          (VISITOR's own key · never stored)
-                                                 ▼  English answer + sources
-        admin: /admin  (login · settings · logs)
-        behind Cloudflare Tunnel → your domain (HTTPS); app listens on :8236
+```mermaid
+flowchart TD
+    Timer(["⏱ every 5 min"]) --> FW["FeedWorker<br/>(BackgroundService)"]
+    FW -->|"conditional GET (ETag)"| V2EX[("V2EX Atom feed")]
+    V2EX -->|"V2exFeed → upsert by V2exId"| DB
+
+    subgraph Storage["SQLite · EF Core · WAL"]
+        DB[("Post · PostEmbedding<br/>RuntimeSettings · Logs")]
+    end
+
+    DB -->|translate| OR["OpenRouter :free<br/><i>server keys</i>"]
+    OR --> T["English title + HTML"]
+    T -.->|write back| DB
+
+    DB -->|"embed (all posts)"| GEM["Gemini<br/><i>key pool, rotated</i>"]
+    GEM --> VEC["vectors"]
+    VEC -.->|write back| DB
+
+    DB -->|read| RP["Razor Pages<br/>/ · /t/{id} · /ask"]
+    DB -->|read| FEED["GET /index.xml<br/>Atom 1.0 (EN)"]
+
+    RP --> CHAT["POST /api/chat"]
+    CHAT -->|"retrieve top-K + time filter"| DB
+    CHAT --> GC["Gemini generateContent<br/><b>VISITOR's own key</b><br/>never stored"]
+    GC --> ANS["English answer + sources"]
+    ANS --> RP
+
+    DB -->|read/write| ADMIN["/admin<br/>login · settings · logs"]
+
+    subgraph Edge["Ingress"]
+        CF["Cloudflare Tunnel → your domain (HTTPS)"]
+    end
+    CF --> APP["App listens on :8236"]
+    APP --> RP
+    APP --> FEED
+    APP --> ADMIN
+
+    classDef ext fill:#fff3e0,stroke:#e65100
+    classDef store fill:#e8f5e9,stroke:#2e7d32
+    classDef vis fill:#e3f2fd,stroke:#1565c0
+    class V2EX,OR,GEM,GC,CF ext
+    class DB store
+    class RP,FEED,ADMIN vis
 ```
 
 ---
