@@ -18,6 +18,12 @@ formatted `yy.MM.dd.HH:mm` in **UTC (timezone 0)**, e.g. `26.06.26.09:47`.
   but the actual `git commit` (and `git push`) is performed manually by the human.
 - Never commit or push unless the human explicitly asks you to in that moment.
   Approval to commit once does not carry over to future changes.
+- **When the AI does make a git commit (once the human has asked for it), always
+  commit as the git user `Ethan <lisen8018@gmail.com>`** — set
+  `git -c user.name="Ethan" -c user.email="lisen8018@gmail.com" commit ...` (or the
+  equivalent `user.name`/`user.email` config) so the commit is authored by that
+  identity, never any other.
+- **After committing, push to the `main` branch directly.**
 
 ## Never break the published website — changes must be backward-compatible
 
