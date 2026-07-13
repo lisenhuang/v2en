@@ -14,10 +14,18 @@
     }
     <link rel="icon" href="~/favicon.ico" />
     <link rel="alternate" type="application/atom+xml" title="V2EX English" href="/index.xml" />
-    @* Set theme before paint to avoid a flash of the wrong theme. *@
+    @* Set theme before paint to avoid a flash of the wrong theme.
+       Mode is one of light | dark | system (missing/legacy → system, which follows the OS).
+       Only light/dark set data-theme; system leaves it unset so prefers-color-scheme wins. *@
     <script>
         (function () {
-            try { var t = localStorage.getItem('theme'); if (t) document.documentElement.setAttribute('data-theme', t); } catch (e) { }
+            try {
+                var t = localStorage.getItem('theme');
+                if (t !== 'light' && t !== 'dark') t = 'system';
+                var el = document.documentElement;
+                el.setAttribute('data-theme-mode', t);
+                if (t === 'light' || t === 'dark') el.setAttribute('data-theme', t);
+            } catch (e) { }
         })();
     </script>
     <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
@@ -27,15 +35,25 @@
         <div class="container header-inner">
             <a class="brand" href="/">
                 <span class="brand-mark">V2</span>
-                <span class="brand-text">V2EX <em>English</em></span>
+                <span class="brand-text">
+                    <strong class="brand-title">V2EN</strong>
+                    <em class="brand-sub">V2EX English</em>
+                </span>
             </a>
+            <form class="header-search" role="search" action="/search" method="get" autocomplete="off">
+                <span class="header-search-ic">@Icons.Svg("search", "icon")</span>
+                <input type="search" name="q" class="header-search-input" maxlength="100"
+                       placeholder="Search posts…" aria-label="Search posts" value="@(ViewData["SearchQuery"])" />
+            </form>
             <nav class="header-nav">
+                <a href="/search" class="nav-link nav-search-btn" title="Search posts" aria-label="Search posts">@Icons.Svg("search", "icon")</a>
                 <a href="/ask" class="nav-link" title="Ask the feed">Ask</a>
                 <a href="/live" class="nav-link" title="Talk live with voice">Talk</a>
                 <a href="/index.xml" class="nav-link" title="English Atom feed">RSS</a>
-                <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle dark mode" title="Toggle theme">
+                <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Theme: system" title="Theme: system (click to change)">
                     @Icons.Svg("moon", "icon theme-icon-moon")
                     @Icons.Svg("sun", "icon theme-icon-sun")
+                    @Icons.Svg("monitor", "icon theme-icon-monitor")
                 </button>
             </nav>
         </div>

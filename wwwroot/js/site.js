@@ -1,21 +1,35 @@
 (function () {
     "use strict";
 
-    // ---------- Theme toggle (default: follow system) ----------
+    // ---------- Theme toggle: cycles system → light → dark → system ----------
+    // "system" leaves data-theme unset so the CSS follows prefers-color-scheme; light/dark pin it.
+    // The stored mode drives both the colors and which icon (monitor/sun/moon) the button shows.
     var root = document.documentElement;
     var toggle = document.getElementById("theme-toggle");
+    var MODES = ["system", "light", "dark"];
 
-    function effectiveTheme() {
-        var explicit = root.getAttribute("data-theme");
-        if (explicit) return explicit;
-        return window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+    function currentMode() {
+        var m = root.getAttribute("data-theme-mode");
+        return MODES.indexOf(m) >= 0 ? m : "system";
+    }
+
+    function applyMode(mode) {
+        root.setAttribute("data-theme-mode", mode);
+        if (mode === "light" || mode === "dark") root.setAttribute("data-theme", mode);
+        else root.removeAttribute("data-theme");           // system → follow the OS
+        try { localStorage.setItem("theme", mode); } catch (e) { }
+        if (toggle) {
+            var label = "Theme: " + mode + " (click to change)";
+            toggle.setAttribute("aria-label", label);
+            toggle.setAttribute("title", label);
+        }
     }
 
     if (toggle) {
+        applyMode(currentMode());                          // sync label to the pre-paint state
         toggle.addEventListener("click", function () {
-            var next = effectiveTheme() === "dark" ? "light" : "dark";
-            root.setAttribute("data-theme", next);
-            try { localStorage.setItem("theme", next); } catch (e) { }
+            var next = MODES[(MODES.indexOf(currentMode()) + 1) % MODES.length];
+            applyMode(next);
         });
     }
 

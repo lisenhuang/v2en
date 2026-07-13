@@ -19,6 +19,12 @@
     var WIN_LS = "v2en_ask_window";
     var MODEL_LS = "v2en_gemini_model";
 
+    // In-memory transcript of this chat so follow-ups ("is there more?") keep context. Each entry is
+    // { role: "user" | "model", text }. A pair is pushed only after an answer succeeds, so error
+    // bubbles never poison the context. Capped to the most recent turns to bound the request size.
+    var history = [];
+    var MAX_HISTORY = 12; // ~6 Q&A pairs
+
     // ── Settings panel (key + model) behind the gear button ──────────────────────────────
     function setSettings(open) {
         settingsPanel.hidden = !open;
@@ -302,10 +308,13 @@
         var botEl = addAssistant();
         sendBtn.disabled = true;
 
+        // Snapshot the prior turns to send; the current question is sent separately as `question`.
+        var priorHistory = history.slice(-MAX_HISTORY);
+
         fetch("/api/chat", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ question: q, apiKey: key, window: windowEl.value, model: modelEl.value || null })
+            body: JSON.stringify({ question: q, apiKey: key, window: windowEl.value, model: modelEl.value || null, history: priorHistory })
         }).then(function (r) {
             return r.json().catch(function () { return {}; }).then(function (data) {
                 return { ok: r.ok, status: r.status, data: data };
@@ -313,6 +322,10 @@
         }).then(function (res) {
             if (res.ok && res.data && res.data.answer != null) {
                 renderAnswer(botEl, res.data.answer, res.data.sources || []);
+                // Only remember successful exchanges so error bubbles never become context.
+                history.push({ role: "user", text: q });
+                history.push({ role: "model", text: res.data.answer });
+                if (history.length > MAX_HISTORY) history = history.slice(-MAX_HISTORY);
             } else {
                 renderError(botEl, (res.data && res.data.error) || "Something went wrong. Try again.");
             }

@@ -88,10 +88,30 @@ a:hover { color: var(--link-hover); text-decoration: underline; }
     width: 32px; height: 32px; border-radius: 8px;
     background: var(--accent); color: #fff; font-size: .85rem; font-weight: 800;
 }
-.brand-text em { color: var(--text-muted); font-style: normal; font-weight: 500; }
+.brand-text { display: inline-flex; flex-direction: column; line-height: 1.1; }
+.brand-title { font-weight: 800; font-size: 1.1rem; color: var(--text); }
+.brand-text em, .brand-sub { color: var(--text-muted); font-style: normal; font-weight: 500; font-size: .72rem; letter-spacing: .02em; }
 
 .header-nav { display: flex; align-items: center; gap: 14px; }
 .nav-link { color: var(--text-muted); font-size: .85rem; font-weight: 600; letter-spacing: .03em; }
+
+/* Header search: a pill that grows to fill the gap between brand and nav (desktop). */
+.header-search {
+    flex: 1 1 auto; max-width: 420px; margin: 0 20px;
+    display: flex; align-items: center; gap: 8px;
+    height: 38px; padding: 0 12px;
+    background: var(--bg-elev); border: 1px solid var(--border); border-radius: 10px;
+    transition: border-color .15s, box-shadow .15s;
+}
+.header-search:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent); }
+.header-search-ic { color: var(--text-muted); display: inline-flex; }
+.header-search-ic .icon { width: 17px; height: 17px; }
+.header-search-input {
+    flex: 1; min-width: 0; border: 0; background: transparent; color: var(--text);
+    font: inherit; font-size: .9rem; outline: none;
+}
+.header-search-input::placeholder { color: var(--text-muted); }
+.nav-search-btn { display: none; }   /* icon shortcut — mobile only (inline bar hidden there) */
 
 .theme-toggle {
     display: inline-grid; place-items: center;
@@ -105,14 +125,13 @@ a:hover { color: var(--link-hover); text-decoration: underline; }
 /* Inline SVG icons (see Utilities/Icons.cs): inherit text color, scale with font-size. */
 .icon { width: 1.1em; height: 1.1em; display: inline-block; vertical-align: -0.18em; flex: none; }
 
-/* Theme toggle shows the moon in light mode (tap → dark) and the sun in dark mode. */
-.theme-icon-sun { display: none; }
-:root[data-theme="dark"] .theme-icon-moon { display: none; }
-:root[data-theme="dark"] .theme-icon-sun { display: inline-block; }
-@media (prefers-color-scheme: dark) {
-    :root:not([data-theme]) .theme-icon-moon { display: none; }
-    :root:not([data-theme]) .theme-icon-sun { display: inline-block; }
-}
+/* Theme toggle shows exactly one icon for the CHOSEN mode: monitor=system, sun=light, moon=dark.
+   Driven by data-theme-mode (set pre-paint from localStorage) so there's no icon flash. */
+.theme-icon-sun, .theme-icon-moon, .theme-icon-monitor { display: none; }
+:root[data-theme-mode="system"] .theme-icon-monitor { display: inline-block; }
+:root[data-theme-mode="light"]  .theme-icon-sun     { display: inline-block; }
+:root[data-theme-mode="dark"]   .theme-icon-moon    { display: inline-block; }
+:root:not([data-theme-mode]) .theme-icon-monitor    { display: inline-block; } /* JS-off fallback */
 
 /* ---------- Main / footer ---------- */
 main.container { flex: 1 0 auto; padding-top: 24px; padding-bottom: 48px; }
@@ -194,6 +213,32 @@ main.container { flex: 1 0 auto; padding-top: 24px; padding-bottom: 48px; }
 /* ---------- Empty / error state ---------- */
 .empty-state { text-align: center; padding: 64px 16px; color: var(--text-muted); }
 .empty-state h1 { color: var(--text); font-size: 1.5rem; margin-bottom: 10px; }
+
+/* ---------- Search page ---------- */
+.search-head { margin: 20px 0 22px; }
+.search-title { font-size: 1.6rem; margin: 0 0 14px; }
+.search-box {
+    display: flex; align-items: center; gap: 10px;
+    padding: 0 8px 0 14px; height: 48px;
+    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+    transition: border-color .15s, box-shadow .15s;
+}
+.search-box:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent); }
+.search-box-ic { color: var(--text-muted); display: inline-flex; }
+.search-box-ic .icon { width: 20px; height: 20px; }
+.search-box-input {
+    flex: 1; min-width: 0; border: 0; background: transparent; color: var(--text);
+    font: inherit; font-size: 1rem; outline: none;
+}
+.search-box-input::placeholder { color: var(--text-muted); }
+.search-box-btn {
+    flex: none; border: 0; border-radius: 8px; cursor: pointer;
+    background: var(--accent); color: #fff; font: inherit; font-weight: 600; font-size: .9rem;
+    padding: 0 16px; height: 36px; transition: filter .15s;
+}
+.search-box-btn:hover { filter: brightness(1.06); }
+.search-meta { margin: 14px 2px 0; color: var(--text-muted); font-size: .9rem; }
+.search-meta strong { color: var(--text); }
 
 /* ---------- Ask the feed (chat) ---------- */
 .ask-intro { margin: 20px 0 18px; }
@@ -387,8 +432,14 @@ main.container { flex: 1 0 auto; padding-top: 24px; padding-bottom: 48px; }
 @media (max-width: 600px) {
     .post { padding: 20px; }
     .post-detail-title { font-size: 1.4rem; }
-    .brand-text { font-size: 1rem; }
+    .brand-title { font-size: 1rem; }
     .ask-bubble { max-width: 92%; }
+
+    /* Header stays one row (the /ask overlay geometry depends on a fixed header height): swap the
+       inline search bar for a compact icon that links to the full /search page. */
+    .header-search { display: none; }
+    .nav-search-btn { display: inline-grid; place-items: center; }
+    .header-nav { gap: 12px; }
 
     /* Ask page becomes a full-screen chat app: no surrounding box, thread scrolls
        internally, composer pinned to the bottom — and, when the on-screen keyboard opens,

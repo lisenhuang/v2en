@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
+using System.Text;
 using v2en.Configuration;
 using v2en.Data;
 using v2en.Services;
@@ -306,13 +307,20 @@ app.MapPost("/api/chat", async (
     if (string.IsNullOrWhiteSpace(cfg.EmbeddingModel))
         return Results.Json(new { error = "Search isn't available right now." }, statusCode: 503);
 
+    // Prior turns the browser replayed, normalized to a valid alternating transcript. Lets the model
+    // (and retrieval) understand follow-ups like "is there more?" instead of treating them in isolation.
+    var history = SanitizeChatHistory(req.History);
+
     var window = RetrievalService.ParseWindow(req.Window);
     // Embed the visitor's query with the VISITOR's own key — same model/dim as the stored post
     // vectors, so the query still lands in the same vector space (the key only authenticates/bills
     // the call, it doesn't change the embedding). The server-side key pool remains in use by the
     // ingestion job to embed posts; only this per-question query embedding is charged to the visitor.
+    // For follow-ups, blend the recent user turns into the embedded query so a bare "is there more?"
+    // still retrieves the posts the conversation is about.
+    var retrievalQuery = BuildRetrievalQuery(history, question);
     var queryKeys = new[] { req.ApiKey! };
-    var search = await retrieval.SearchAsync(question, cfg.EmbeddingModel, cfg.EmbeddingDim, window, cfg.RetrievalTopK, queryKeys, ct);
+    var search = await retrieval.SearchAsync(retrievalQuery, cfg.EmbeddingModel, cfg.EmbeddingDim, window, cfg.RetrievalTopK, queryKeys, ct);
     if (search.Error is not null)
         return Results.Json(new { error = search.Error }, statusCode: 503);
     if (search.Hits.Count == 0)
@@ -321,7 +329,7 @@ app.MapPost("/api/chat", async (
     var contextPosts = search.Hits.Take(Math.Max(1, cfg.ChatMaxContextPosts)).ToList();
     // Visitor-chosen chat model when supplied & well-formed, else the dashboard default.
     var chatModel = SanitizeModelId(req.Model) ?? cfg.ChatModel;
-    var result = await chat.AnswerAsync(question, req.ApiKey!, chatModel, contextPosts, ct);
+    var result = await chat.AnswerAsync(question, req.ApiKey!, chatModel, contextPosts, history, ct);
 
     // Dashboard log — NEVER the visitor's key.
     db.TranslationLogs.Add(new TranslationLog
@@ -487,6 +495,63 @@ static bool LooksPredominantlyCjk(string s)
     return letters > 0 && cjk * 2 >= letters;
 }
 
+// The browser replays prior turns so follow-ups ("is there more?") keep context. Gemini requires the
+// conversation to start with a "user" turn and to alternate user/model, so we normalize the untrusted
+// client input into that exact shape: map roles, drop blanks, clip each message, keep only the most
+// recent turns, and force strict alternation ending on a "model" turn (the live question — always a
+// "user" turn — is appended after this). Bounds token cost and can't break the API contract.
+static IReadOnlyList<ChatTurn> SanitizeChatHistory(IReadOnlyList<ChatMessage>? history)
+{
+    const int maxTurns = 12;        // ~6 Q&A pairs of carried context
+    const int maxLenPerTurn = 4000; // clip any single replayed message
+
+    if (history is null || history.Count == 0) return Array.Empty<ChatTurn>();
+
+    // Normalize roles + text first, dropping anything empty.
+    var mapped = new List<ChatTurn>(history.Count);
+    foreach (var m in history)
+    {
+        var text = (m.Text ?? "").Trim();
+        if (text.Length == 0) continue;
+        if (text.Length > maxLenPerTurn) text = text[..maxLenPerTurn];
+        var role = (m.Role ?? "").Trim().ToLowerInvariant() is "model" or "assistant" or "bot" ? "model" : "user";
+        mapped.Add(new ChatTurn(role, text));
+    }
+    if (mapped.Count == 0) return Array.Empty<ChatTurn>();
+
+    // Keep only the most recent turns.
+    if (mapped.Count > maxTurns) mapped = mapped.GetRange(mapped.Count - maxTurns, maxTurns);
+
+    // Force a valid, alternating transcript that starts with "user".
+    var cleaned = new List<ChatTurn>(mapped.Count);
+    var expect = "user";
+    foreach (var t in mapped)
+    {
+        if (t.Role != expect) continue;                 // skip out-of-order turns
+        cleaned.Add(t);
+        expect = expect == "user" ? "model" : "user";
+    }
+    // The next thing appended is the live "user" question, so history must end on a "model" turn.
+    if (cleaned.Count > 0 && cleaned[^1].Role == "user") cleaned.RemoveAt(cleaned.Count - 1);
+    return cleaned;
+}
+
+// A bare follow-up like "is there more?" embeds to nothing useful, so the vector search would miss the
+// posts the conversation is actually about. Prepend the recent USER turns to the current question to
+// give retrieval the topical signal it needs. Clipped so the embedding query stays bounded.
+static string BuildRetrievalQuery(IReadOnlyList<ChatTurn> history, string question)
+{
+    const int maxLen = 1000;
+    if (history.Count == 0) return question;
+
+    var sb = new StringBuilder();
+    foreach (var t in history)
+        if (t.Role == "user") sb.Append(t.Text).Append(' ');
+    sb.Append(question);
+    var q = sb.ToString().Trim();
+    return q.Length > maxLen ? q[..maxLen] : q;
+}
+
 // A visitor-supplied model id is interpolated into the Gemini request path, so accept only a safe
 // model-id shape (letters, digits, dot, hyphen). Anything else (or empty) → null, and the caller
 // falls back to the dashboard's configured chat model. Prevents path/URL injection.
@@ -499,9 +564,14 @@ static string? SanitizeModelId(string? model)
     return m;
 }
 
+/// <summary>One earlier message the browser replays so follow-ups keep context. Role is "user" or
+/// "model" (Gemini's vocabulary); anything else is normalized server-side.</summary>
+record ChatMessage(string? Role, string? Text);
+
 /// <summary>Public chat request body. ApiKey is the visitor's own Gemini key — used once, never stored.
-/// Model is the visitor-chosen chat model (optional; falls back to the dashboard default).</summary>
-record ChatRequest(string? Question, string? ApiKey, string? Window, string? Model);
+/// Model is the visitor-chosen chat model (optional; falls back to the dashboard default).
+/// History is the prior turns of this same chat (optional; older clients omit it and still work).</summary>
+record ChatRequest(string? Question, string? ApiKey, string? Window, string? Model, IReadOnlyList<ChatMessage>? History);
 
 /// <summary>Body for the public chat model-picker lookup: the visitor's own Gemini key.</summary>
 record ChatModelsRequest(string? ApiKey);

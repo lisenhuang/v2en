@@ -8,6 +8,11 @@ namespace v2en.Services;
 public record ChatSource(long V2exId, string Title, string Url, DateTimeOffset Published);
 public record ChatResult(bool Success, string? Answer, IReadOnlyList<ChatSource> Sources, int? HttpStatus, string? Error, string? Detail = null);
 
+/// <summary>One earlier message in the ongoing chat. <c>Role</c> is Gemini's own vocabulary:
+/// "user" for the visitor, "model" for a previous assistant answer. Passed so follow-up questions
+/// ("is there more?", "tell me about the first one") can be understood in context.</summary>
+public record ChatTurn(string Role, string Text);
+
 /// <summary>
 /// Calls Gemini generateContent to answer a question from retrieved posts, using the PUBLIC
 /// visitor's OWN API key supplied per request. The key is placed on a fresh HttpRequestMessage
@@ -31,7 +36,12 @@ public class GeminiChatService
         "replies are in Chinese. Answer the user's question USING ONLY these posts and any details you " +
         "fetch. Summarize the relevant posts' points of view, be concise, and cite the posts you used " +
         "with their [#n] markers. Only ever share links to THIS mirror (paths like /t/<id>); never link " +
-        "to v2ex.com. If none of the posts are relevant, say so plainly.";
+        "to v2ex.com. If none of the posts are relevant, say so plainly. " +
+        "This is an ongoing conversation: earlier user questions and your earlier answers may appear " +
+        "before the latest question. Use them to resolve follow-ups (e.g. \"is there more?\", \"tell me " +
+        "about the first one\") — do NOT say the request is unclear when the earlier turns make it clear. " +
+        "The [#n] markers always refer to the numbered post list given with the LATEST question, so cite " +
+        "from that list.";
 
     // Tool surface offered to the model. Kept in a field so every turn sends the same declaration.
     private static readonly object Tools = new[]
@@ -75,7 +85,8 @@ public class GeminiChatService
     }
 
     public async Task<ChatResult> AnswerAsync(
-        string question, string userApiKey, string model, IReadOnlyList<RetrievedPost> context, CancellationToken ct)
+        string question, string userApiKey, string model, IReadOnlyList<RetrievedPost> context,
+        IReadOnlyList<ChatTurn> history, CancellationToken ct)
     {
         var sources = context
             .Select(p => new ChatSource(p.V2exId, p.Title, p.SourceUrl, p.Published))
@@ -85,10 +96,13 @@ public class GeminiChatService
         var generationConfig = new { temperature = 0.3 };
 
         // Mutable conversation; it grows as the model calls get_post_details and we feed results back.
-        var contents = new List<object>
-        {
-            new { role = "user", parts = new object[] { new { text = BuildPrompt(question, context) } } }
-        };
+        // Earlier turns (already sanitized to alternate user/model and start with "user") come first so
+        // the model can resolve follow-up questions; the latest question carries the freshly retrieved
+        // context posts.
+        var contents = new List<object>();
+        foreach (var turn in history)
+            contents.Add(new { role = turn.Role, parts = new object[] { new { text = turn.Text } } });
+        contents.Add(new { role = "user", parts = new object[] { new { text = BuildPrompt(question, context) } } });
 
         for (int turn = 0; turn < MaxToolTurns; turn++)
         {

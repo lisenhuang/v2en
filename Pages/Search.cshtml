@@ -1,0 +1,76 @@
+@page "/search"
+@model v2en.Pages.SearchModel
+@{
+    ViewData["Title"] = string.IsNullOrEmpty(Model.Query) ? "Search" : $"Search: {Model.Query}";
+    ViewData["Description"] = "Search the translated V2EX posts by keyword.";
+    ViewData["SearchQuery"] = Model.Query;   // pre-fills the header search box on this page
+}
+
+<section class="search-head">
+    <h1 class="search-title">Search posts</h1>
+    <form class="search-box" role="search" action="/search" method="get" autocomplete="off">
+        <span class="search-box-ic">@Icons.Svg("search", "icon")</span>
+        <input type="search" name="q" class="search-box-input" maxlength="100"
+               value="@Model.Query" placeholder="Search by keyword…" aria-label="Search posts" autofocus />
+        <button type="submit" class="search-box-btn">Search</button>
+    </form>
+    @if (Model.Searched)
+    {
+        <p class="search-meta">
+            <strong>@Model.ResultCount</strong> result@(Model.ResultCount == 1 ? "" : "s") for “@Model.Query”
+        </p>
+    }
+</section>
+
+@if (!Model.Searched)
+{
+    <section class="empty-state">
+        <p>Type a keyword above to search the translated posts by title and content.</p>
+    </section>
+}
+else if (Model.Posts.Count == 0)
+{
+    <section class="empty-state">
+        <h1>No matches</h1>
+        <p>Nothing found for “@Model.Query”. Try different or fewer words.</p>
+    </section>
+}
+else
+{
+    <ul class="post-list">
+        @foreach (var p in Model.Posts)
+        {
+            <li class="post-card">
+                <a class="post-card-link" href="/t/@p.V2exId">
+                    <h2 class="post-title">@(p.TitleEn ?? p.TitleZh)</h2>
+                    <p class="post-preview">@HtmlText.Preview(p.ContentEnHtml)</p>
+                </a>
+                <div class="post-meta">
+                    <span class="author">@p.AuthorName</span>
+                    <span class="dot">·</span>
+                    <time datetime="@p.Published.ToString("o")">@p.Published.UtcDateTime.ToString("yyyy-MM-dd HH:mm")Z</time>
+                </div>
+            </li>
+        }
+    </ul>
+
+    <nav class="pager">
+        @if (Model.CurrentPage > 1)
+        {
+            <a class="pager-btn" href="/search?q=@(Uri.EscapeDataString(Model.Query))&p=@(Model.CurrentPage - 1)">← Newer</a>
+        }
+        else
+        {
+            <span class="pager-btn disabled">← Newer</span>
+        }
+        <span class="pager-page">Page @Model.CurrentPage</span>
+        @if (Model.HasNext)
+        {
+            <a class="pager-btn" href="/search?q=@(Uri.EscapeDataString(Model.Query))&p=@(Model.CurrentPage + 1)">Older →</a>
+        }
+        else
+        {
+            <span class="pager-btn disabled">Older →</span>
+        }
+    </nav>
+}
