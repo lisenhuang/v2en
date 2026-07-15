@@ -6,6 +6,9 @@ using v2en.Data;
 
 namespace v2en.Services;
 
+/// <summary>One ordered translation attempt: which provider + model (+ reasoning for ChatGPT) to use.</summary>
+public record TranslationStep(string Provider, string Model, string? Reasoning);
+
 /// <summary>
 /// Loads and persists the single <see cref="RuntimeSettings"/> row. On first run the row is
 /// seeded from appsettings/Options so the dashboard starts with sensible values; after that the
@@ -57,6 +60,32 @@ public class RuntimeSettingsService
         _db.RuntimeSettings.Add(s);
         await _db.SaveChangesAsync(ct);
         return s;
+    }
+
+    /// <summary>Canonical provider ids the routing understands.</summary>
+    public const string ProviderOpenRouter = "openrouter";
+    public const string ProviderChatGpt = "chatgpt";
+
+    /// <summary>
+    /// Build the ordered primary→fallback translation steps from the settings. A slot is only included
+    /// when it names a known provider AND a model. Returns an empty list when neither slot is configured,
+    /// which signals the caller to fall back to the legacy OpenRouter free-model chain in
+    /// <see cref="RuntimeSettings.ModelsJson"/> (so an upgraded site keeps translating unchanged).
+    /// </summary>
+    public static List<TranslationStep> BuildTranslationSteps(RuntimeSettings s)
+    {
+        var steps = new List<TranslationStep>();
+        AddStep(steps, s.TranslationPrimaryProvider, s.TranslationPrimaryModel, s.TranslationPrimaryReasoning);
+        AddStep(steps, s.TranslationFallbackProvider, s.TranslationFallbackModel, s.TranslationFallbackReasoning);
+        return steps;
+    }
+
+    private static void AddStep(List<TranslationStep> steps, string? provider, string? model, string? reasoning)
+    {
+        var p = (provider ?? "").Trim().ToLowerInvariant();
+        var m = (model ?? "").Trim();
+        if ((p == ProviderOpenRouter || p == ProviderChatGpt) && m.Length > 0)
+            steps.Add(new TranslationStep(p, m, string.IsNullOrWhiteSpace(reasoning) ? null : reasoning.Trim().ToLowerInvariant()));
     }
 
     public static List<string> ParseModels(RuntimeSettings s)

@@ -12,15 +12,20 @@ public class SettingsModel : PageModel
     private readonly RuntimeSettingsService _settings;
     private readonly OpenRouterModelsService _orModels;
     private readonly GeminiModelsService _gModels;
+    private readonly ChatGptAuthService _chatGptAuth;
+    private readonly ChatGptModelsService _chatGptModels;
     private readonly VectorCache _vectorCache;
 
     public SettingsModel(AppDbContext db, RuntimeSettingsService settings,
-        OpenRouterModelsService orModels, GeminiModelsService gModels, VectorCache vectorCache)
+        OpenRouterModelsService orModels, GeminiModelsService gModels,
+        ChatGptAuthService chatGptAuth, ChatGptModelsService chatGptModels, VectorCache vectorCache)
     {
         _db = db;
         _settings = settings;
         _orModels = orModels;
         _gModels = gModels;
+        _chatGptAuth = chatGptAuth;
+        _chatGptModels = chatGptModels;
         _vectorCache = vectorCache;
     }
 
@@ -33,6 +38,14 @@ public class SettingsModel : PageModel
     [BindProperty] public int MaxAttempts { get; set; }
     [BindProperty] public int MaxOutputTokens { get; set; }
     [BindProperty] public double Temperature { get; set; }
+
+    // ── Translation provider routing (primary → fallback) ──
+    [BindProperty] public string TranslationPrimaryProvider { get; set; } = "";
+    [BindProperty] public string TranslationPrimaryModel { get; set; } = "";
+    [BindProperty] public string TranslationPrimaryReasoning { get; set; } = "";
+    [BindProperty] public string TranslationFallbackProvider { get; set; } = "";
+    [BindProperty] public string TranslationFallbackModel { get; set; } = "";
+    [BindProperty] public string TranslationFallbackReasoning { get; set; } = "";
 
     // ── API keys (blank submit = keep existing) ──
     [BindProperty] public string? OpenRouterApiKey { get; set; }
@@ -63,6 +76,11 @@ public class SettingsModel : PageModel
     public bool Saved { get; set; }
     public string? Error { get; set; }
 
+    // ── ChatGPT (Codex) account + model catalogue ──
+    public ChatGptStatus ChatGpt { get; private set; } = new(false, null, null, null, null);
+    public IReadOnlyList<ChatGptModel> ChatGptModels { get; private set; } = Array.Empty<ChatGptModel>();
+    public string? Notice { get; set; }
+
     public async Task OnGetAsync(CancellationToken ct)
     {
         var cfg = await _settings.GetAsync(ct);
@@ -88,6 +106,15 @@ public class SettingsModel : PageModel
         cfg.MaxAttempts = Math.Clamp(MaxAttempts, 1, 20);
         cfg.MaxOutputTokens = Math.Clamp(MaxOutputTokens, 256, 32_000);
         cfg.Temperature = Math.Clamp(Temperature, 0, 2);
+
+        // Translation provider routing (primary → fallback). Each slot: provider + model (+ reasoning
+        // for ChatGPT). Leaving BOTH providers blank keeps the legacy OpenRouter free-model chain above.
+        cfg.TranslationPrimaryProvider = NormalizeProvider(TranslationPrimaryProvider);
+        cfg.TranslationPrimaryModel = (TranslationPrimaryModel ?? "").Trim();
+        cfg.TranslationPrimaryReasoning = NormalizeReasoning(TranslationPrimaryReasoning);
+        cfg.TranslationFallbackProvider = NormalizeProvider(TranslationFallbackProvider);
+        cfg.TranslationFallbackModel = (TranslationFallbackModel ?? "").Trim();
+        cfg.TranslationFallbackReasoning = NormalizeReasoning(TranslationFallbackReasoning);
 
         // Keys: only overwrite when a value was actually entered (blank = keep current).
         if (!string.IsNullOrWhiteSpace(OpenRouterApiKey))
@@ -140,6 +167,13 @@ public class SettingsModel : PageModel
         MaxOutputTokens = cfg.MaxOutputTokens;
         Temperature = cfg.Temperature;
 
+        TranslationPrimaryProvider = cfg.TranslationPrimaryProvider;
+        TranslationPrimaryModel = cfg.TranslationPrimaryModel;
+        TranslationPrimaryReasoning = cfg.TranslationPrimaryReasoning;
+        TranslationFallbackProvider = cfg.TranslationFallbackProvider;
+        TranslationFallbackModel = cfg.TranslationFallbackModel;
+        TranslationFallbackReasoning = cfg.TranslationFallbackReasoning;
+
         EmbeddingModel = cfg.EmbeddingModel;
         EmbeddingDim = cfg.EmbeddingDim;
         EmbedMaxPerTick = cfg.EmbedMaxPerTick;
@@ -163,6 +197,85 @@ public class SettingsModel : PageModel
         return RedirectToPage();
     }
 
+    // ── ChatGPT (Codex) account handlers (called via fetch / small forms) ─────────────────────────
+
+    /// <summary>Begin "Sign in with ChatGPT" — returns the one-time code + verification URL.</summary>
+    public async Task<IActionResult> OnPostChatGptDeviceStartAsync(CancellationToken ct)
+    {
+        try
+        {
+            var start = await _chatGptAuth.StartDeviceAuthAsync(ct);
+            return new JsonResult(new
+            {
+                ok = true,
+                deviceAuthId = start.DeviceAuthId,
+                userCode = start.UserCode,
+                verificationUri = start.VerificationUri,
+                interval = start.IntervalSeconds,
+            });
+        }
+        catch (Exception ex)
+        {
+            return new JsonResult(new { ok = false, error = ex.Message });
+        }
+    }
+
+    /// <summary>Poll once for device-code approval. status = pending | done | error.</summary>
+    public async Task<IActionResult> OnPostChatGptDevicePollAsync(string? deviceAuthId, string? userCode, CancellationToken ct)
+    {
+        var result = await _chatGptAuth.PollDeviceAuthAsync(deviceAuthId ?? "", userCode ?? "", ct);
+        return new JsonResult(new { status = result.Status, error = result.Error });
+    }
+
+    /// <summary>Import a pasted Codex auth.json (fallback when device-code login is disabled).</summary>
+    public async Task<IActionResult> OnPostChatGptImportAsync(string? authJson, CancellationToken ct)
+    {
+        try
+        {
+            await _chatGptAuth.ImportAuthJsonAsync(authJson ?? "", ct);
+            TempData["Notice"] = "ChatGPT account connected.";
+        }
+        catch (Exception ex)
+        {
+            TempData["Notice"] = "Couldn't connect ChatGPT: " + ex.Message;
+        }
+        return RedirectToPage();
+    }
+
+    public async Task<IActionResult> OnPostChatGptDisconnectAsync(CancellationToken ct)
+    {
+        await _chatGptAuth.DisconnectAsync(ct);
+        TempData["Notice"] = "ChatGPT account disconnected.";
+        return RedirectToPage();
+    }
+
+    /// <summary>Live model list for the picker (id + reasoning levels). Used by a "reload" button.</summary>
+    public IActionResult OnGetChatGptModels()
+    {
+        return new JsonResult(new
+        {
+            models = _chatGptModels.GetModels().Select(m => new
+            {
+                id = m.Id,
+                displayName = m.DisplayName,
+                efforts = m.ReasoningEfforts,
+                defaultEffort = m.DefaultReasoning,
+            }),
+        });
+    }
+
+    private static string NormalizeProvider(string? p)
+    {
+        var v = (p ?? "").Trim().ToLowerInvariant();
+        return v is RuntimeSettingsService.ProviderOpenRouter or RuntimeSettingsService.ProviderChatGpt ? v : "";
+    }
+
+    private static string NormalizeReasoning(string? r)
+    {
+        var v = (r ?? "").Trim().ToLowerInvariant();
+        return v is "" or "default" or "none" ? "" : v;
+    }
+
     private async Task LoadDisplayAsync(RuntimeSettings cfg, CancellationToken ct)
     {
         OpenRouterKeySet = !string.IsNullOrWhiteSpace(cfg.OpenRouterApiKey);
@@ -176,5 +289,9 @@ public class SettingsModel : PageModel
         var lists = await _gModels.GetModelsAsync(geminiKey, ct);
         EmbeddingModelOptions = lists.Embedding;
         ChatModelOptions = lists.Chat;
+
+        ChatGpt = await _chatGptAuth.GetStatusAsync(ct);
+        ChatGptModels = _chatGptModels.GetModels();
+        Notice ??= TempData["Notice"] as string;
     }
 }
