@@ -250,11 +250,12 @@ public class SettingsModel : PageModel
     }
 
     /// <summary>Live model list for the picker (id + reasoning levels). Used by a "reload" button.</summary>
-    public IActionResult OnGetChatGptModels()
+    public async Task<IActionResult> OnGetChatGptModelsAsync(CancellationToken ct)
     {
+        var models = await _chatGptModels.GetModelsAsync(ct);
         return new JsonResult(new
         {
-            models = _chatGptModels.GetModels().Select(m => new
+            models = models.Select(m => new
             {
                 id = m.Id,
                 displayName = m.DisplayName,
@@ -291,7 +292,7 @@ public class SettingsModel : PageModel
         ChatModelOptions = lists.Chat;
 
         ChatGpt = await _chatGptAuth.GetStatusAsync(ct);
-        ChatGptModels = _chatGptModels.GetModels();
+        ChatGptModels = await _chatGptModels.GetModelsAsync(ct);
         Notice ??= TempData["Notice"] as string;
     }
 }

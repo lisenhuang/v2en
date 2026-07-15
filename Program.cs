@@ -61,7 +61,8 @@ builder.Services.AddHttpClient<OpenRouterAccountService>(ConfigureOpenRouterClie
 // and stored in the DB; the translator sends them per-request. No key/secret in config.
 builder.Services.AddHttpClient<ChatGptAuthService>(c => c.BaseAddress = new Uri("https://auth.openai.com/"));
 builder.Services.AddHttpClient<ChatGptTranslator>(c => c.BaseAddress = new Uri("https://chatgpt.com/backend-api/codex/"));
-builder.Services.AddSingleton<ChatGptModelsService>();
+// Live model list: same Codex backend, hits GET /models with the account's OAuth token.
+builder.Services.AddHttpClient<ChatGptModelsService>(c => c.BaseAddress = new Uri("https://chatgpt.com/backend-api/codex/"));
 
 // ── Gemini clients (embeddings + chat + live model list). Keys are per-request. ──
 const string GeminiBase = "https://generativelanguage.googleapis.com/";

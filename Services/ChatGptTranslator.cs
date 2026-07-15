@@ -81,10 +81,11 @@ public class ChatGptTranslator
             req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", accessToken);
             if (!string.IsNullOrWhiteSpace(accountId))
                 req.Headers.TryAddWithoutValidation("chatgpt-account-id", accountId);
-            req.Headers.TryAddWithoutValidation("OpenAI-Beta", "responses=experimental");
             req.Headers.TryAddWithoutValidation("originator", "codex_cli_rs");
-            req.Headers.TryAddWithoutValidation("session_id", Guid.NewGuid().ToString());
-            req.Headers.TryAddWithoutValidation("User-Agent", "codex_cli_rs (v2en-translator)");
+            req.Headers.TryAddWithoutValidation("session-id", Guid.NewGuid().ToString());
+            // The Codex backend reads the CLI version from User-Agent and can degrade requests from
+            // clients it deems outdated — so the "codex_cli_rs/<version>" prefix must be present and current.
+            req.Headers.TryAddWithoutValidation("User-Agent", $"codex_cli_rs/{ChatGptModelsService.CodexCliVersion} (v2en-translator)");
             req.Headers.Accept.ParseAdd("text/event-stream");
 
             using var resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
