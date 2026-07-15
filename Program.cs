@@ -63,6 +63,12 @@ builder.Services.AddHttpClient<ChatGptAuthService>(c => c.BaseAddress = new Uri(
 builder.Services.AddHttpClient<ChatGptTranslator>(c => c.BaseAddress = new Uri("https://chatgpt.com/backend-api/codex/"));
 // Live model list: same Codex backend, hits GET /models with the account's OAuth token.
 builder.Services.AddHttpClient<ChatGptModelsService>(c => c.BaseAddress = new Uri("https://chatgpt.com/backend-api/codex/"));
+// Live usage / rate-limit status (GET /wham/usage) — reads the plan's 5h + weekly windows, no tokens spent.
+builder.Services.AddHttpClient<ChatGptUsageService>(c =>
+{
+    c.BaseAddress = new Uri("https://chatgpt.com/backend-api/");
+    c.Timeout = TimeSpan.FromSeconds(10); // never let a slow status call hang the settings page
+});
 
 // ── Gemini clients (embeddings + chat + live model list). Keys are per-request. ──
 const string GeminiBase = "https://generativelanguage.googleapis.com/";

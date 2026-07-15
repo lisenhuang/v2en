@@ -1,5 +1,6 @@
 @page
 @using System.Text.Json
+@using v2en.Services
 @model v2en.Pages.Admin.SettingsModel
 @{
     ViewData["Title"] = "Settings";
@@ -69,6 +70,43 @@
             @if (!string.IsNullOrWhiteSpace(Model.ChatGpt.Plan)) { <span>· plan: <strong>@Model.ChatGpt.Plan</strong></span> }
             @if (!string.IsNullOrWhiteSpace(Model.ChatGpt.AccountId)) { <span class="muted">· acct @Model.ChatGpt.AccountId</span> }
         </p>
+
+        @* ── Live plan usage: 5-hour + weekly rate-limit windows (read from the Codex backend, no tokens spent) ── *@
+        @if (Model.ChatGptUsage is { } usage)
+        {
+            <div class="cgpt-usage" style="margin:12px 0; display:flex; flex-direction:column; gap:12px;">
+                @foreach (var win in new[] { usage.Primary, usage.Secondary })
+                {
+                    if (win is null) { continue; }
+                    var inv = System.Globalization.CultureInfo.InvariantCulture;
+                    var pct = Math.Clamp(win.UsedPercent, 0, 100);
+                    var barColor = pct >= 90 ? "#e5484d" : pct >= 70 ? "#f5a623" : "#30a46c";
+                    var barStyle = $"height:100%;width:{pct.ToString("0.#", inv)}%;background:{barColor};";
+                    var resetTxt = win.ResetsUtc is { } r
+                        ? $"resets in {ChatGptUsageService.Humanize(r - DateTimeOffset.UtcNow)} · {r.UtcDateTime.ToString("MMM d, HH:mm", inv)} UTC"
+                        : "reset time unknown";
+                    <div class="usage-row">
+                        <div style="display:flex; justify-content:space-between; font-size:.85rem; margin-bottom:4px;">
+                            <span><strong>@win.Label</strong> window</span>
+                            <span class="mono">@pct.ToString("0", inv)% used</span>
+                        </div>
+                        <div style="height:7px; border-radius:6px; background:var(--border); overflow:hidden;">
+                            <div style="@barStyle"></div>
+                        </div>
+                        <div class="hint muted" style="margin:4px 0 0; font-size:.8rem;">@resetTxt</div>
+                    </div>
+                }
+                <p class="hint muted" style="margin:0; font-size:.78rem;">
+                    @if (usage.LimitReached) { <span class="badge warn">limit reached</span> }
+                    Usage as of @usage.FetchedUtc.UtcDateTime.ToString("HH:mm") UTC · reads your plan's Codex limits, no tokens used.
+                </p>
+            </div>
+        }
+        else
+        {
+            <p class="hint muted" style="margin:8px 0; font-size:.82rem;">Plan usage status is unavailable right now.</p>
+        }
+
         <div class="btn-row">
             <form method="post" asp-page-handler="ChatGptDisconnect" class="inline-form"
                   onsubmit="return confirm('Disconnect this ChatGPT account? Translation steps that use ChatGPT will pause until you reconnect.');">

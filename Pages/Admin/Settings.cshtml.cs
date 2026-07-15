@@ -14,11 +14,13 @@ public class SettingsModel : PageModel
     private readonly GeminiModelsService _gModels;
     private readonly ChatGptAuthService _chatGptAuth;
     private readonly ChatGptModelsService _chatGptModels;
+    private readonly ChatGptUsageService _chatGptUsage;
     private readonly VectorCache _vectorCache;
 
     public SettingsModel(AppDbContext db, RuntimeSettingsService settings,
         OpenRouterModelsService orModels, GeminiModelsService gModels,
-        ChatGptAuthService chatGptAuth, ChatGptModelsService chatGptModels, VectorCache vectorCache)
+        ChatGptAuthService chatGptAuth, ChatGptModelsService chatGptModels,
+        ChatGptUsageService chatGptUsage, VectorCache vectorCache)
     {
         _db = db;
         _settings = settings;
@@ -26,6 +28,7 @@ public class SettingsModel : PageModel
         _gModels = gModels;
         _chatGptAuth = chatGptAuth;
         _chatGptModels = chatGptModels;
+        _chatGptUsage = chatGptUsage;
         _vectorCache = vectorCache;
     }
 
@@ -76,9 +79,10 @@ public class SettingsModel : PageModel
     public bool Saved { get; set; }
     public string? Error { get; set; }
 
-    // ── ChatGPT (Codex) account + model catalogue ──
+    // ── ChatGPT (Codex) account + model catalogue + live usage ──
     public ChatGptStatus ChatGpt { get; private set; } = new(false, null, null, null, null);
     public IReadOnlyList<ChatGptModel> ChatGptModels { get; private set; } = Array.Empty<ChatGptModel>();
+    public ChatGptUsage? ChatGptUsage { get; private set; }
     public string? Notice { get; set; }
 
     public async Task OnGetAsync(CancellationToken ct)
@@ -293,6 +297,7 @@ public class SettingsModel : PageModel
 
         ChatGpt = await _chatGptAuth.GetStatusAsync(ct);
         ChatGptModels = await _chatGptModels.GetModelsAsync(ct);
+        ChatGptUsage = ChatGpt.Connected ? await _chatGptUsage.GetUsageAsync(ct) : null;
         Notice ??= TempData["Notice"] as string;
     }
 }
