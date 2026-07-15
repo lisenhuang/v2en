@@ -56,6 +56,13 @@ builder.Services.AddHttpClient<OpenRouterTranslator>(ConfigureOpenRouterClient);
 builder.Services.AddHttpClient<OpenRouterModelsService>(ConfigureOpenRouterClient);
 builder.Services.AddHttpClient<OpenRouterAccountService>(ConfigureOpenRouterClient);
 
+// ── ChatGPT (Codex) translation: OAuth (auth.openai.com) + the Codex Responses backend ──
+// Tokens are obtained from /admin ("Sign in with ChatGPT" device-code flow, or a pasted auth.json)
+// and stored in the DB; the translator sends them per-request. No key/secret in config.
+builder.Services.AddHttpClient<ChatGptAuthService>(c => c.BaseAddress = new Uri("https://auth.openai.com/"));
+builder.Services.AddHttpClient<ChatGptTranslator>(c => c.BaseAddress = new Uri("https://chatgpt.com/backend-api/codex/"));
+builder.Services.AddSingleton<ChatGptModelsService>();
+
 // ── Gemini clients (embeddings + chat + live model list). Keys are per-request. ──
 const string GeminiBase = "https://generativelanguage.googleapis.com/";
 builder.Services.AddHttpClient<GeminiModelsService>(c => c.BaseAddress = new Uri(GeminiBase));
@@ -87,6 +94,9 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
         options.Cookie.SameSite = SameSiteMode.Lax;
     });
 builder.Services.AddAuthorization();
+
+// Let the admin's fetch() calls (ChatGPT device-code sign-in) send the antiforgery token as a header.
+builder.Services.AddAntiforgery(o => o.HeaderName = "RequestVerificationToken");
 
 // ── Infrastructure ────────────────────────────────────────────────────────────────
 builder.Services.AddHealthChecks();

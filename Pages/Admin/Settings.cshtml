@@ -1,4 +1,5 @@
 @page
+@using System.Text.Json
 @model v2en.Pages.Admin.SettingsModel
 @{
     ViewData["Title"] = "Settings";
@@ -13,6 +14,26 @@
     }
     var embedOptions = WithCurrent(Model.EmbeddingModelOptions.Select(m => m.Id), Model.EmbeddingModel);
     var chatOptions = WithCurrent(Model.ChatModelOptions.Select(m => m.Id), Model.ChatModel);
+
+    // Model catalogues handed to the client so the provider pickers can swap model + reasoning options.
+    var chatGptModelsJson = JsonSerializer.Serialize(Model.ChatGptModels.Select(m => new
+    {
+        id = m.Id,
+        displayName = m.DisplayName,
+        efforts = m.ReasoningEfforts,
+        defaultEffort = m.DefaultReasoning,
+    }));
+    var openRouterModelsJson = JsonSerializer.Serialize(Model.FreeModels.Select(m => m.Id));
+    var routing = new
+    {
+        primaryProvider = Model.TranslationPrimaryProvider,
+        primaryModel = Model.TranslationPrimaryModel,
+        primaryReasoning = Model.TranslationPrimaryReasoning,
+        fallbackProvider = Model.TranslationFallbackProvider,
+        fallbackModel = Model.TranslationFallbackModel,
+        fallbackReasoning = Model.TranslationFallbackReasoning,
+    };
+    var routingJson = JsonSerializer.Serialize(routing);
 }
 
 <h1>Settings</h1>
@@ -22,10 +43,74 @@
 {
     <div class="alert ok">Settings saved.</div>
 }
+@if (Model.Notice is not null)
+{
+    <div class="alert ok">@Model.Notice</div>
+}
 @if (Model.Error is not null)
 {
     <div class="alert err">@Model.Error</div>
 }
+
+@* ── ChatGPT (Codex) account — standalone (its own forms; can't nest inside the main settings form) ── *@
+<div class="card" id="chatgpt-card">
+    @Html.AntiForgeryToken()
+    <h2>ChatGPT (Codex) account</h2>
+    <p class="hint">
+        Sign in with your ChatGPT plan to translate with OpenAI's Codex models (GPT-5.x). Uses the same
+        OAuth as the Codex CLI. You can select ChatGPT as the primary or fallback translation provider below.
+    </p>
+
+    @if (Model.ChatGpt.Connected)
+    {
+        <p class="hint">
+            <span class="badge ok">connected</span>
+            @if (!string.IsNullOrWhiteSpace(Model.ChatGpt.Label)) { <span class="mono">@Model.ChatGpt.Label</span> }
+            @if (!string.IsNullOrWhiteSpace(Model.ChatGpt.Plan)) { <span>· plan: <strong>@Model.ChatGpt.Plan</strong></span> }
+            @if (!string.IsNullOrWhiteSpace(Model.ChatGpt.AccountId)) { <span class="muted">· acct @Model.ChatGpt.AccountId</span> }
+        </p>
+        <div class="btn-row">
+            <form method="post" asp-page-handler="ChatGptDisconnect" class="inline-form"
+                  onsubmit="return confirm('Disconnect this ChatGPT account? Translation steps that use ChatGPT will pause until you reconnect.');">
+                <button type="submit" class="btn btn-ghost btn-sm">Disconnect</button>
+            </form>
+        </div>
+    }
+    else
+    {
+        <p class="hint"><span class="badge warn">not connected</span> Sign in to enable ChatGPT translation.</p>
+        <div class="btn-row">
+            <button type="button" id="cgpt-signin" class="btn btn-primary btn-sm">Sign in with ChatGPT</button>
+        </div>
+        <div id="cgpt-device" style="display:none; margin-top:12px; padding:12px; border:1px solid var(--border); border-radius:10px;">
+            <p class="hint" style="margin-top:0">
+                1. Open <a id="cgpt-device-link" href="#" target="_blank" rel="noopener">auth.openai.com/codex/device</a>
+                and enter this one-time code:
+            </p>
+            <p class="mono" id="cgpt-device-code" style="font-size:1.4rem; letter-spacing:2px; margin:6px 0"></p>
+            <p class="hint" id="cgpt-device-status">Waiting for you to approve on the other page…</p>
+            <p class="hint muted">
+                Device-code sign-in must be enabled in ChatGPT → Settings → Security
+                (“Enable device code authentication for Codex”). Never share this code.
+            </p>
+        </div>
+        <div id="cgpt-error" class="alert err" style="display:none; margin-top:10px"></div>
+
+        <details style="margin-top:12px">
+            <summary class="hint">Advanced: paste a Codex <span class="mono">auth.json</span> instead</summary>
+            <form method="post" asp-page-handler="ChatGptImport" style="margin-top:8px">
+                <p class="hint">
+                    Run <span class="mono">codex login</span> on your own machine, then paste the contents of
+                    <span class="mono">~/.codex/auth.json</span> here. Stored (and refreshed) server-side.
+                </p>
+                <textarea name="authJson" rows="4" class="mono"
+                          style="width:100%; padding:10px 12px; border-radius:10px; border:1px solid var(--border); background:var(--bg); color:var(--text); resize:vertical;"
+                          placeholder='{ "tokens": { "access_token": "…", "refresh_token": "…", "id_token": "…", "account_id": "…" } }'></textarea>
+                <div class="btn-row"><button type="submit" class="btn btn-ghost btn-sm">Connect from auth.json</button></div>
+            </form>
+        </details>
+    }
+</div>
 
 <form method="post">
     <div class="card">
@@ -68,10 +153,71 @@
     </div>
 
     <div class="card">
-        <h2>Translation — model fallback order</h2>
+        <h2>Translation providers — primary &amp; fallback</h2>
+        <p class="hint">
+            Pick the <strong>primary</strong> translator and an optional <strong>fallback</strong>. Each can be
+            <strong>ChatGPT</strong> (your connected plan's Codex models) or <strong>OpenRouter</strong> (a
+            <span class="mono">:free</span> model). The fallback is only used when the primary fails or is rate-limited.
+            <br />Leave <em>both</em> providers on “— none —” to keep the legacy OpenRouter free-model chain below.
+        </p>
+        <div class="form-grid">
+            <div class="field">
+                <label asp-for="TranslationPrimaryProvider">Primary provider</label>
+                <select asp-for="TranslationPrimaryProvider" class="prov-select" data-slot="primary">
+                    <option value="">— none —</option>
+                    <option value="chatgpt">ChatGPT (Codex)</option>
+                    <option value="openrouter">OpenRouter (:free)</option>
+                </select>
+            </div>
+            <div class="field">
+                <label asp-for="TranslationPrimaryModel">Primary model</label>
+                <input type="text" asp-for="TranslationPrimaryModel" class="prov-model" data-slot="primary"
+                       list="models-primary" autocomplete="off" placeholder="pick a provider first" />
+                <datalist id="models-primary"></datalist>
+            </div>
+            <div class="field prov-reasoning-field" data-slot="primary">
+                <label asp-for="TranslationPrimaryReasoning">Primary reasoning</label>
+                <p class="hint">ChatGPT only. Levels depend on the model.</p>
+                <select asp-for="TranslationPrimaryReasoning" class="prov-reasoning" data-slot="primary"></select>
+            </div>
+        </div>
+        <div class="form-grid" style="margin-top:8px">
+            <div class="field">
+                <label asp-for="TranslationFallbackProvider">Fallback provider</label>
+                <select asp-for="TranslationFallbackProvider" class="prov-select" data-slot="fallback">
+                    <option value="">— none —</option>
+                    <option value="chatgpt">ChatGPT (Codex)</option>
+                    <option value="openrouter">OpenRouter (:free)</option>
+                </select>
+            </div>
+            <div class="field">
+                <label asp-for="TranslationFallbackModel">Fallback model</label>
+                <input type="text" asp-for="TranslationFallbackModel" class="prov-model" data-slot="fallback"
+                       list="models-fallback" autocomplete="off" placeholder="pick a provider first" />
+                <datalist id="models-fallback"></datalist>
+            </div>
+            <div class="field prov-reasoning-field" data-slot="fallback">
+                <label asp-for="TranslationFallbackReasoning">Fallback reasoning</label>
+                <p class="hint">ChatGPT only. Levels depend on the model.</p>
+                <select asp-for="TranslationFallbackReasoning" class="prov-reasoning" data-slot="fallback"></select>
+            </div>
+        </div>
+        <p class="hint" id="prov-chatgpt-warn" style="display:@(Model.ChatGpt.Connected ? "none" : "block")">
+            <span class="badge warn">no ChatGPT account</span>
+            Connect a ChatGPT account above to use the ChatGPT provider.
+        </p>
+        <div class="btn-row">
+            <button type="button" id="prov-reload-models" class="btn btn-ghost btn-sm">Reload model list</button>
+            <span class="muted" id="prov-reload-status" style="align-self:center"></span>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>OpenRouter free-model chain</h2>
         <p class="hint">
             One OpenRouter model id per line, tried top to bottom (first success wins). Only
             <span class="mono">:free</span> models are accepted. Tick a model to add/remove it, or edit to reorder.
+            This chain is used when neither provider slot above is set, and it also supplies the OpenRouter model list.
         </p>
         <div class="field">
             <textarea asp-for="ModelsText" id="ModelsText" rows="5" class="mono"
@@ -274,6 +420,131 @@
             });
             ta.addEventListener('input', syncChecks);
             syncChecks();
+        })();
+
+        // ── Translation provider pickers (primary + fallback) ──────────────────────────────────────
+        (function () {
+            var CGPT_MODELS = @Html.Raw(chatGptModelsJson);   // [{id, displayName, efforts, defaultEffort}]
+            var OR_MODELS = @Html.Raw(openRouterModelsJson);  // ["id:free", ...]
+            var ROUTING = @Html.Raw(routingJson);
+            var ALL_EFFORTS = ['minimal', 'low', 'medium', 'high', 'xhigh'];
+
+            function findCgpt(id) {
+                id = (id || '').toLowerCase();
+                for (var i = 0; i < CGPT_MODELS.length; i++)
+                    if (CGPT_MODELS[i].id.toLowerCase() === id) return CGPT_MODELS[i];
+                return null;
+            }
+            function effortsFor(id) { var m = findCgpt(id); return m ? m.efforts : ALL_EFFORTS; }
+
+            function fillDatalist(slot, provider) {
+                var dl = document.getElementById('models-' + slot);
+                if (!dl) return;
+                dl.innerHTML = '';
+                var ids = provider === 'chatgpt' ? CGPT_MODELS.map(function (m) { return m.id; })
+                        : provider === 'openrouter' ? OR_MODELS : [];
+                ids.forEach(function (id) { var o = document.createElement('option'); o.value = id; dl.appendChild(o); });
+            }
+            function fillReasoning(slot, provider, model, selected) {
+                var field = document.querySelector('.prov-reasoning-field[data-slot="' + slot + '"]');
+                var sel = document.querySelector('.prov-reasoning[data-slot="' + slot + '"]');
+                if (!field || !sel) return;
+                if (provider !== 'chatgpt') { field.style.display = 'none'; sel.innerHTML = ''; return; }
+                field.style.display = '';
+                var efforts = effortsFor(model);
+                sel.innerHTML = '';
+                var d = document.createElement('option'); d.value = ''; d.textContent = '— model default —'; sel.appendChild(d);
+                efforts.forEach(function (e) { var o = document.createElement('option'); o.value = e; o.textContent = e; sel.appendChild(o); });
+                if (selected && efforts.indexOf(selected) === -1) {
+                    var c = document.createElement('option'); c.value = selected; c.textContent = selected + ' (custom)'; sel.appendChild(c);
+                }
+                sel.value = selected || '';
+            }
+            function syncSlot(slot, reasoningValue) {
+                var provSel = document.querySelector('.prov-select[data-slot="' + slot + '"]');
+                var modelInput = document.querySelector('.prov-model[data-slot="' + slot + '"]');
+                if (!provSel || !modelInput) return;
+                var provider = provSel.value;
+                fillDatalist(slot, provider);
+                modelInput.disabled = !provider;
+                modelInput.placeholder = !provider ? 'pick a provider first'
+                    : provider === 'chatgpt' ? 'e.g. gpt-5.1-codex' : 'e.g. deepseek/deepseek-r1:free';
+                var current = reasoningValue !== undefined
+                    ? reasoningValue
+                    : (document.querySelector('.prov-reasoning[data-slot="' + slot + '"]') || {}).value;
+                fillReasoning(slot, provider, modelInput.value, current);
+            }
+
+            ['primary', 'fallback'].forEach(function (slot) {
+                var provSel = document.querySelector('.prov-select[data-slot="' + slot + '"]');
+                var modelInput = document.querySelector('.prov-model[data-slot="' + slot + '"]');
+                if (!provSel || !modelInput) return;
+                provSel.addEventListener('change', function () { syncSlot(slot, ''); });
+                modelInput.addEventListener('input', function () {
+                    var sel = document.querySelector('.prov-reasoning[data-slot="' + slot + '"]');
+                    syncSlot(slot, sel ? sel.value : '');
+                });
+                var saved = slot === 'primary' ? ROUTING.primaryReasoning : ROUTING.fallbackReasoning;
+                syncSlot(slot, saved);
+            });
+
+            var reload = document.getElementById('prov-reload-models');
+            if (reload) reload.addEventListener('click', function () {
+                var status = document.getElementById('prov-reload-status');
+                if (status) status.textContent = 'Loading…';
+                fetch('?handler=ChatGptModels', { headers: { 'Accept': 'application/json' } })
+                    .then(function (r) { return r.json(); })
+                    .then(function (j) {
+                        if (j && j.models) { CGPT_MODELS = j.models; ['primary', 'fallback'].forEach(function (s) { syncSlot(s); }); }
+                        if (status) status.textContent = 'Loaded ' + (j.models ? j.models.length : 0) + ' ChatGPT model(s).';
+                    })
+                    .catch(function () { if (status) status.textContent = 'Reload failed.'; });
+            });
+        })();
+
+        // ── "Sign in with ChatGPT" device-code flow ────────────────────────────────────────────────
+        (function () {
+            var btn = document.getElementById('cgpt-signin');
+            if (!btn) return;
+            var card = document.getElementById('chatgpt-card');
+            function tok() { var t = card.querySelector('input[name="__RequestVerificationToken"]'); return t ? t.value : ''; }
+            function showError(msg) {
+                var e = document.getElementById('cgpt-error');
+                if (!e) return;
+                if (!msg) { e.style.display = 'none'; e.textContent = ''; return; }
+                e.style.display = ''; e.textContent = msg;
+            }
+
+            btn.addEventListener('click', function () {
+                btn.disabled = true; showError('');
+                fetch('?handler=ChatGptDeviceStart', { method: 'POST', headers: { 'RequestVerificationToken': tok() } })
+                    .then(function (r) { return r.json(); })
+                    .then(function (j) {
+                        if (!j.ok) { showError(j.error || 'Could not start sign-in.'); btn.disabled = false; return; }
+                        document.getElementById('cgpt-device').style.display = '';
+                        document.getElementById('cgpt-device-code').textContent = j.userCode;
+                        var link = document.getElementById('cgpt-device-link');
+                        if (link && j.verificationUri) link.href = j.verificationUri;
+                        poll(j.deviceAuthId, j.userCode, Math.max(2, j.interval || 5));
+                    })
+                    .catch(function () { showError('Network error starting sign-in.'); btn.disabled = false; });
+            });
+
+            function poll(id, code, interval) {
+                var statusEl = document.getElementById('cgpt-device-status');
+                function once() {
+                    var params = new URLSearchParams({ deviceAuthId: id, userCode: code });
+                    fetch('?handler=ChatGptDevicePoll&' + params.toString(), { method: 'POST', headers: { 'RequestVerificationToken': tok() } })
+                        .then(function (r) { return r.json(); })
+                        .then(function (j) {
+                            if (j.status === 'done') { if (statusEl) statusEl.textContent = 'Connected! Reloading…'; location.reload(); return; }
+                            if (j.status === 'error') { showError(j.error || 'Sign-in failed.'); return; }
+                            setTimeout(once, interval * 1000);
+                        })
+                        .catch(function () { setTimeout(once, interval * 1000); });
+                }
+                setTimeout(once, interval * 1000);
+            }
         })();
     </script>
 }

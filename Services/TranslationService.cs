@@ -19,6 +19,8 @@ public class TranslationService
     private readonly AppDbContext _db;
     private readonly V2exFeedClient _feed;
     private readonly OpenRouterTranslator _translator;
+    private readonly ChatGptTranslator _chatGptTranslator;
+    private readonly ChatGptAuthService _chatGptAuth;
     private readonly HtmlSanitizerService _sanitizer;
     private readonly RuntimeSettingsService _settings;
     private readonly GeminiEmbeddingService _embedder;
@@ -29,6 +31,8 @@ public class TranslationService
         AppDbContext db,
         V2exFeedClient feed,
         OpenRouterTranslator translator,
+        ChatGptTranslator chatGptTranslator,
+        ChatGptAuthService chatGptAuth,
         HtmlSanitizerService sanitizer,
         RuntimeSettingsService settings,
         GeminiEmbeddingService embedder,
@@ -38,6 +42,8 @@ public class TranslationService
         _db = db;
         _feed = feed;
         _translator = translator;
+        _chatGptTranslator = chatGptTranslator;
+        _chatGptAuth = chatGptAuth;
         _sanitizer = sanitizer;
         _settings = settings;
         _embedder = embedder;
@@ -133,6 +139,8 @@ public class TranslationService
     {
         var cfg = await _settings.GetAsync(ct);
         var models = RuntimeSettingsService.ParseModels(cfg);
+        var steps = RuntimeSettingsService.BuildTranslationSteps(cfg);
+        var useRouting = steps.Count > 0;
         var now = DateTimeOffset.UtcNow;
 
         // Bound the dashboard log table.
@@ -145,20 +153,37 @@ public class TranslationService
             state.QuotaWindowResetUtc = new DateTimeOffset(now.UtcDateTime.Date.AddDays(1), TimeSpan.Zero);
         }
 
-        if (string.IsNullOrWhiteSpace(cfg.OpenRouterApiKey))
+        if (useRouting)
         {
-            _logger.LogWarning("No OpenRouter API key set; translation paused.");
-            Log(LogSeverity.Warning, "translate_skipped", "Translation is paused — set your OpenRouter API key in the dashboard.");
-            await _db.SaveChangesAsync(ct);
-            return;
+            // New primary→fallback routing (ChatGPT and/or OpenRouter). Pause only when NO configured
+            // step has usable credentials (missing OpenRouter key / no ChatGPT account connected).
+            if (!steps.Any(s => IsStepUsable(s, cfg)))
+            {
+                _logger.LogWarning("No translation provider is usable; translation paused.");
+                Log(LogSeverity.Warning, "translate_skipped",
+                    "Translation is paused — connect a ChatGPT account or set your OpenRouter key for the chosen provider(s) in Settings.");
+                await _db.SaveChangesAsync(ct);
+                return;
+            }
         }
-
-        if (models.Count == 0)
+        else
         {
-            _logger.LogWarning("No translation models configured; skipping translation.");
-            Log(LogSeverity.Error, "no_models", "No AI models configured — set at least one :free model in the dashboard.");
-            await _db.SaveChangesAsync(ct);
-            return;
+            // Legacy behaviour: OpenRouter free-model chain in ModelsJson.
+            if (string.IsNullOrWhiteSpace(cfg.OpenRouterApiKey))
+            {
+                _logger.LogWarning("No OpenRouter API key set; translation paused.");
+                Log(LogSeverity.Warning, "translate_skipped", "Translation is paused — set your OpenRouter API key in the dashboard.");
+                await _db.SaveChangesAsync(ct);
+                return;
+            }
+
+            if (models.Count == 0)
+            {
+                _logger.LogWarning("No translation models configured; skipping translation.");
+                Log(LogSeverity.Error, "no_models", "No AI models configured — pick a translation provider/model (or a :free OpenRouter model) in the dashboard.");
+                await _db.SaveChangesAsync(ct);
+                return;
+            }
         }
 
         var remainingDaily = cfg.DailyQuota - state.TranslationsToday;
@@ -196,14 +221,16 @@ public class TranslationService
                 await Task.Delay(TimeSpan.FromSeconds(cfg.MinDelaySecondsBetweenCalls), ct);
 
             var post = pending[i];
-            var outcome = await _translator.TranslateAsync(
-                post.TitleZh, post.ContentZhHtml, cfg.OpenRouterApiKey, models, cfg.MaxOutputTokens, cfg.Temperature, ct);
+            var outcome = useRouting
+                ? await TranslateWithStepsAsync(post, steps, cfg, ct)
+                : await _translator.TranslateAsync(
+                    post.TitleZh, post.ContentZhHtml, cfg.OpenRouterApiKey, models, cfg.MaxOutputTokens, cfg.Temperature, ct);
 
             if (outcome.RateLimited)
             {
-                _logger.LogWarning("Rate-limited by OpenRouter; stopping translation for this tick.");
+                _logger.LogWarning("Rate-limited by the translation provider; stopping translation for this tick.");
                 Log(LogSeverity.Warning, "rate_limited",
-                    "OpenRouter rate-limited the account; paused translation for this tick.",
+                    "The translation provider rate-limited the account; paused translation for this tick.",
                     v2exId: post.V2exId, model: outcome.Model, httpStatus: 429,
                     detail: FormatAttempts(outcome.Attempts));
                 await _db.SaveChangesAsync(ct);
@@ -249,6 +276,74 @@ public class TranslationService
 
         await _db.SaveChangesAsync(ct);
     }
+
+    /// <summary>
+    /// Translate one post by trying the configured providers in order (primary, then fallback). The
+    /// first success wins. A step whose credentials are missing is skipped. The aggregate is
+    /// "rate-limited" only when EVERY attempted step was rate-limited (nothing genuinely ran), so the
+    /// caller defers without charging an attempt — same contract as the single-provider path.
+    /// </summary>
+    private async Task<TranslationOutcome> TranslateWithStepsAsync(
+        Post post, IReadOnlyList<TranslationStep> steps, RuntimeSettings cfg, CancellationToken ct)
+    {
+        var attempts = new List<TranslationAttempt>();
+        bool anyGenuineAttempt = false;
+        string? lastError = null;
+
+        foreach (var step in steps)
+        {
+            TranslationOutcome outcome;
+            if (step.Provider == RuntimeSettingsService.ProviderChatGpt)
+            {
+                var token = await _chatGptAuth.GetValidAccessTokenAsync(ct);
+                if (token is null)
+                {
+                    attempts.Add(new TranslationAttempt(step.Model, null, "chatgpt_not_connected",
+                        "No ChatGPT account connected (or its token couldn't be refreshed) — reconnect in Settings."));
+                    anyGenuineAttempt = true; // a configured provider is unusable — not a transient rate-limit
+                    lastError = "ChatGPT account not connected.";
+                    continue;
+                }
+                outcome = await _chatGptTranslator.TranslateAsync(
+                    post.TitleZh, post.ContentZhHtml, token.Value.AccessToken, token.Value.AccountId,
+                    step.Model, step.Reasoning, cfg.MaxOutputTokens, ct);
+            }
+            else // OpenRouter
+            {
+                if (string.IsNullOrWhiteSpace(cfg.OpenRouterApiKey))
+                {
+                    attempts.Add(new TranslationAttempt(step.Model, null, "openrouter_no_key",
+                        "No OpenRouter API key set — add it in Settings."));
+                    anyGenuineAttempt = true;
+                    lastError = "OpenRouter API key not set.";
+                    continue;
+                }
+                outcome = await _translator.TranslateAsync(
+                    post.TitleZh, post.ContentZhHtml, cfg.OpenRouterApiKey, new[] { step.Model },
+                    cfg.MaxOutputTokens, cfg.Temperature, ct);
+            }
+
+            attempts.AddRange(outcome.Attempts);
+            if (outcome.Success)
+                return outcome with { Attempts = attempts };
+            if (!outcome.RateLimited) anyGenuineAttempt = true;
+            lastError = outcome.Error ?? lastError;
+            // Fall through to the next provider (fallback), whether this was rate-limited or a hard error.
+        }
+
+        return new TranslationOutcome(false, null, null, null, RateLimited: !anyGenuineAttempt,
+            lastError ?? "No usable translation provider configured", attempts);
+    }
+
+    /// <summary>A step can run only when its provider has credentials.</summary>
+    private static bool IsStepUsable(TranslationStep step, RuntimeSettings cfg) =>
+        step.Provider switch
+        {
+            RuntimeSettingsService.ProviderChatGpt =>
+                !string.IsNullOrWhiteSpace(cfg.ChatGptAccessToken) || !string.IsNullOrWhiteSpace(cfg.ChatGptRefreshToken),
+            RuntimeSettingsService.ProviderOpenRouter => !string.IsNullOrWhiteSpace(cfg.OpenRouterApiKey),
+            _ => false,
+        };
 
     /// <summary>
     /// Embeds posts that have no vector yet (or whose content/model/dim changed), independent of

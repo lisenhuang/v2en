@@ -64,5 +64,32 @@ public class RuntimeSettings
     public int ChatMaxContextPosts { get; set; } = 8;
     public int ChatRateLimitPerMinutePerIp { get; set; } = 6;
 
+    // ── Translation provider routing (primary → fallback) ─────────────────────────
+    // Each slot picks a provider ("" | "openrouter" | "chatgpt") and a model. When BOTH slots are
+    // empty (a freshly-upgraded site), translation keeps using the legacy OpenRouter free-model
+    // chain in <see cref="ModelsJson"/> so nothing breaks. Set a provider to switch to explicit
+    // primary/fallback routing. ChatGPT slots also carry a reasoning effort ("" = model default).
+    public string TranslationPrimaryProvider { get; set; } = "";
+    public string TranslationPrimaryModel { get; set; } = "";
+    public string TranslationPrimaryReasoning { get; set; } = "";
+    public string TranslationFallbackProvider { get; set; } = "";
+    public string TranslationFallbackModel { get; set; } = "";
+    public string TranslationFallbackReasoning { get; set; } = "";
+
+    // ── ChatGPT (Codex) account, connected from /admin via device-code OAuth ──────
+    // Tokens are obtained by the "Sign in with ChatGPT" flow (or by pasting a Codex auth.json) and
+    // refreshed automatically. Empty ⇒ no ChatGPT account connected (ChatGPT translation paused).
+    public string ChatGptAccessToken { get; set; } = "";
+    public string ChatGptRefreshToken { get; set; } = "";
+    public string ChatGptIdToken { get; set; } = "";
+    /// <summary>ChatGPT account id (from the access-token JWT) sent as the chatgpt-account-id header.</summary>
+    public string ChatGptAccountId { get; set; } = "";
+    /// <summary>When the current access token expires. Refreshed ~a few minutes early.</summary>
+    public DateTimeOffset? ChatGptAccessTokenExpiresUtc { get; set; }
+    /// <summary>Plan type (e.g. "plus"/"pro") from the token, shown in the dashboard. Informational.</summary>
+    public string ChatGptPlanType { get; set; } = "";
+    /// <summary>Account email/label if present in the id token — display only.</summary>
+    public string ChatGptAccountLabel { get; set; } = "";
+
     public DateTimeOffset? UpdatedUtc { get; set; }
 }
