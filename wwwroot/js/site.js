@@ -33,6 +33,29 @@
         });
     }
 
+    // ---------- Post detail: translation ⇄ original ----------
+    // The server renders both versions and the link already works on its own (it points at ?lang=zh,
+    // which renders the original directly) — this only upgrades it to an instant in-place swap, so
+    // with JavaScript off the button still does the right thing, one navigation later.
+    var langToggle = document.getElementById("lang-toggle");
+    var post = document.getElementById("post");
+    if (langToggle && post) {
+        langToggle.addEventListener("click", function (e) {
+            e.preventDefault();
+            var original = post.classList.toggle("show-original");
+            // The label and href say where a click GOES; the address bar says what is being SHOWN.
+            langToggle.textContent = langToggle.getAttribute(
+                original ? "data-label-to-english" : "data-label-to-original");
+            langToggle.setAttribute("href", langToggle.getAttribute(
+                original ? "data-href-english" : "data-href-original"));
+            // replaceState, not pushState: Back should leave the post, not undo a toggle.
+            try {
+                history.replaceState(null, "", langToggle.getAttribute(
+                    original ? "data-href-original" : "data-href-english"));
+            } catch (err) { }
+        });
+    }
+
     // ---------- Relative time ----------
     function relative(date) {
         var diff = (Date.now() - date.getTime()) / 1000; // seconds

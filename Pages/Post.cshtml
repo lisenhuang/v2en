@@ -1,15 +1,30 @@
 @page "/t/{id:long}"
 @model PostModel
 @{
-    ViewData["Title"] = Model.Post.TitleEn ?? Model.Post.TitleZh;
+    var titleEn = Model.Post.TitleEn ?? Model.Post.TitleZh;
+    // Title/description/canonical stay on the English translation whichever version is showing: the
+    // page is the same document either way, and the canonical already points at V2EX itself.
+    ViewData["Title"] = titleEn;
     ViewData["Description"] = HtmlText.Preview(Model.Post.ContentEnHtml, 160);
     ViewData["Canonical"] = Model.Post.SourceUrl;
+
+    var hrefEnglish = $"/t/{Model.Post.V2exId}";
+    var hrefOriginal = $"/t/{Model.Post.V2exId}?lang=zh";
+    const string labelToOriginal = "View original (中文)";
+    const string labelToEnglish = "Show English translation";
 }
 
-<article class="post">
+@* Both versions are rendered; this class decides which one is visible (see site.css / site.js). *@
+<article id="post" class="post@(Model.ShowOriginalFirst ? " show-original" : "")">
     <a class="back-link" href="/">← Home</a>
 
-    <h1 class="post-detail-title">@(Model.Post.TitleEn ?? Model.Post.TitleZh)</h1>
+    <h1 class="post-detail-title">
+        <span class="lang-en" lang="en">@titleEn</span>
+        @if (Model.HasOriginal)
+        {
+            <span class="lang-zh" lang="zh-Hans">@Model.Post.TitleZh</span>
+        }
+    </h1>
 
     <div class="post-meta">
         <span class="author">@Model.Post.AuthorName</span>
@@ -17,9 +32,32 @@
         <time datetime="@Model.Post.Published.ToString("o")">@Model.Post.Published.UtcDateTime.ToString("yyyy-MM-dd HH:mm")Z</time>
     </div>
 
-    <div class="post-content">
+    @if (Model.HasOriginal)
+    {
+        @* A real link, not a bare button: without JavaScript it navigates to the server-rendered
+           original, and the URL it points at is shareable. The script cancels the navigation and
+           swaps in place. href = where the click GOES, the address bar = what is currently SHOWN. *@
+        <div class="post-lang">
+            <a id="lang-toggle"
+               class="lang-toggle"
+               href="@(Model.ShowOriginalFirst ? hrefEnglish : hrefOriginal)"
+               data-href-english="@hrefEnglish"
+               data-href-original="@hrefOriginal"
+               data-label-to-original="@labelToOriginal"
+               data-label-to-english="@labelToEnglish">@(Model.ShowOriginalFirst ? labelToEnglish : labelToOriginal)</a>
+        </div>
+    }
+
+    <div class="post-content lang-en" lang="en">
         @Html.Raw(Model.Post.ContentEnHtml)
     </div>
+    @if (Model.HasOriginal)
+    {
+        @* Sanitized in the page model — this is the only place raw V2EX HTML reaches a browser. *@
+        <div class="post-content lang-zh" lang="zh-Hans">
+            @Html.Raw(Model.OriginalHtml)
+        </div>
+    }
 
     <div class="post-footer">
         <a class="source-link" href="@Model.Post.SourceUrl" rel="nofollow noopener" target="_blank">View original on V2EX →</a>

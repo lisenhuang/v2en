@@ -210,6 +210,21 @@ main.container { flex: 1 0 auto; padding-top: 24px; padding-bottom: 48px; }
 .post-footer { margin-top: 28px; padding-top: 18px; border-top: 1px solid var(--border); }
 .source-link { font-weight: 600; }
 
+/* Original vs translation. Both are in the DOM; the class on .post picks which one shows, so the
+   swap costs no request. `revert` rather than a fixed value, because these rules cover both the
+   inline <span>s in the title and the block bodies below it. */
+.post .lang-zh { display: none; }
+.post.show-original .lang-en { display: none; }
+.post.show-original .lang-zh { display: revert; }
+
+.post-lang { margin-top: 14px; }
+.lang-toggle {
+    display: inline-block; padding: 5px 11px; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--bg-elev); color: var(--text-muted);
+    font-size: .82rem; font-weight: 600;
+}
+.lang-toggle:hover { border-color: var(--accent); color: var(--text); text-decoration: none; }
+
 /* ---------- Empty / error state ---------- */
 .empty-state { text-align: center; padding: 64px 16px; color: var(--text-muted); }
 .empty-state h1 { color: var(--text); font-size: 1.5rem; margin-bottom: 10px; }
