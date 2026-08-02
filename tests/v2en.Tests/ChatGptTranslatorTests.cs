@@ -164,7 +164,120 @@ public class ChatGptTranslatorTests
         Assert.Contains("\"stream\":true", sentBody);
     }
 
+    // ── SSE parsing (bug: parser was chosen by Content-Type, which the live endpoint omits) ──
+
+    [Fact]
+    public async Task Translate_ParsesProductionSse_WithEventLinesAndCrlf()
+    {
+        var translator = TranslatorReturningSse(ProductionSse("Hello world", "<p>Hi there</p>"), "text/event-stream");
+
+        var outcome = await translator.TranslateAsync(
+            "标题", "<p>内容</p>", DummyToken, DummyAccount, "gpt-5.6-sol", "medium", CancellationToken.None);
+
+        Assert.True(outcome.Success, outcome.Error);
+        Assert.Equal("Hello world", outcome.Title);           // accumulated from response.output_text.delta
+        Assert.Equal("<p>Hi there</p>", outcome.ContentHtml);
+    }
+
+    /// <summary>THE regression: live Codex responses are chunked SSE with NO Content-Type header.</summary>
+    [Fact]
+    public async Task Translate_ParsesSse_WhenNoContentTypeHeader()
+    {
+        var translator = TranslatorReturningSse(ProductionSse("No content type", "<p>works</p>"), contentType: null);
+
+        var outcome = await translator.TranslateAsync(
+            "标题", "<p>内容</p>", DummyToken, DummyAccount, "gpt-5.6-sol", "medium", CancellationToken.None);
+
+        Assert.True(outcome.Success, outcome.Error);
+        Assert.Equal("No content type", outcome.Title);
+        Assert.Equal("<p>works</p>", outcome.ContentHtml);
+    }
+
+    [Fact]
+    public async Task Translate_UsesCompletedOutput_AsFallback_WhenNoDeltas()
+    {
+        var payload = JsonSerializer.Serialize(new { title = "From completed", content = "<p>fallback</p>" });
+        var completed = JsonSerializer.Serialize(new
+        {
+            type = "response.completed",
+            response = new { output = new object[] { new { type = "message", content = new object[] { new { type = "output_text", text = payload } } } } },
+        });
+        // No output_text.delta events at all — only response.completed carries the text.
+        var sse = $"event: response.created\r\ndata: {{\"type\":\"response.created\"}}\r\n\r\n"
+                + $"event: response.completed\r\ndata: {completed}\r\n\r\ndata: [DONE]\r\n\r\n";
+
+        var outcome = await TranslatorReturningSse(sse, contentType: null).TranslateAsync(
+            "标题", "<p>内容</p>", DummyToken, DummyAccount, "gpt-5.6-sol", "medium", CancellationToken.None);
+
+        Assert.True(outcome.Success, outcome.Error);
+        Assert.Equal("From completed", outcome.Title);
+        Assert.Equal("<p>fallback</p>", outcome.ContentHtml);
+    }
+
+    [Fact]
+    public async Task Translate_SurfacesResponseFailedEvent()
+    {
+        var failed = JsonSerializer.Serialize(new
+        {
+            type = "response.failed",
+            response = new { error = new { message = "the model exploded" } },
+        });
+        var sse = $"event: response.failed\r\ndata: {failed}\r\n\r\n";
+
+        var outcome = await TranslatorReturningSse(sse, "text/event-stream").TranslateAsync(
+            "标题", "<p>内容</p>", DummyToken, DummyAccount, "gpt-5.6-sol", "medium", CancellationToken.None);
+
+        Assert.False(outcome.Success);
+        Assert.NotNull(outcome.Error);
+        Assert.Contains("the model exploded", outcome.Error);
+        Assert.DoesNotContain(DummyToken, outcome.Error);            // requirement 8: never leak the token
+    }
+
+    /// <summary>Requirement 7: a 200 with no usable text is a clear failure, not a silent empty success.</summary>
+    [Fact]
+    public async Task Translate_EmptyStream_ReturnsClearDiagnostic()
+    {
+        var sse = "event: response.created\r\ndata: {\"type\":\"response.created\"}\r\n\r\ndata: [DONE]\r\n\r\n";
+
+        var outcome = await TranslatorReturningSse(sse, contentType: null).TranslateAsync(
+            "标题", "<p>内容</p>", DummyToken, DummyAccount, "gpt-5.6-sol", "medium", CancellationToken.None);
+
+        Assert.False(outcome.Success);
+        Assert.NotNull(outcome.Error);
+        Assert.Contains("no usable text", outcome.Error);
+    }
+
     // ── helpers ──
+
+    /// <summary>A production-like Codex SSE stream: event:/data: pairs, CRLF endings, streamed deltas,
+    /// then output_text.done and response.completed carrying the full text, and a trailing [DONE].</summary>
+    private static string ProductionSse(string title, string html)
+    {
+        var payload = JsonSerializer.Serialize(new { title, content = html });
+        var half = payload.Length / 2;
+        static string Frame(string ev, object data) => $"event: {ev}\r\ndata: {JsonSerializer.Serialize(data)}\r\n\r\n";
+        return Frame("response.created", new { type = "response.created" })
+             + Frame("response.output_text.delta", new { type = "response.output_text.delta", delta = payload[..half] })
+             + Frame("response.output_text.delta", new { type = "response.output_text.delta", delta = payload[half..] })
+             + Frame("response.output_text.done", new { type = "response.output_text.done", text = payload })
+             + Frame("response.completed", new
+             {
+                 type = "response.completed",
+                 response = new { output = new object[] { new { type = "message", content = new object[] { new { type = "output_text", text = payload } } } } },
+             })
+             + "data: [DONE]\r\n\r\n";
+    }
+
+    /// <summary>200 OK returning <paramref name="sse"/>; pass contentType=null to omit the header entirely
+    /// (mirroring the live Codex endpoint, which sends only chunked transfer-encoding).</summary>
+    private static ChatGptTranslator TranslatorReturningSse(string sse, string? contentType) =>
+        TranslatorWith(_ =>
+        {
+            var content = new StringContent(sse, Encoding.UTF8);
+            content.Headers.ContentType = contentType is null ? null : new System.Net.Http.Headers.MediaTypeHeaderValue(contentType);
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = content };
+        });
+
 
     private static ChatGptTranslator TranslatorWith(Func<HttpRequestMessage, HttpResponseMessage> responder) =>
         TranslatorWith(req => Task.FromResult(responder(req)));

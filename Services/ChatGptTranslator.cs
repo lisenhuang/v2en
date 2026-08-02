@@ -83,10 +83,11 @@ public class ChatGptTranslator
                 return new TranslationOutcome(false, null, null, model, false, $"HTTP {status} from ChatGPT: {Clip(err)}", attempts);
             }
 
-            var mediaType = resp.Content.Headers.ContentType?.MediaType ?? "";
-            var (content, streamError) = mediaType.Contains("event-stream", StringComparison.OrdinalIgnoreCase)
-                ? await ReadResponsesStreamAsync(resp, ct)
-                : await ReadResponsesJsonAsync(resp, ct);
+            // The request always sets stream=true, and the Codex backend streams SSE even when it OMITS
+            // the Content-Type header (only chunked transfer-encoding, no "text/event-stream"). So never
+            // branch on Content-Type — always parse the body as SSE. ReadResponsesStreamAsync internally
+            // falls back to plain-JSON parsing if the body has no SSE frames (a genuine non-streamed object).
+            var (content, streamError) = await ReadResponsesStreamAsync(resp, ct);
 
             if (streamError is not null)
             {
@@ -96,8 +97,10 @@ public class ChatGptTranslator
 
             if (string.IsNullOrWhiteSpace(content))
             {
-                attempts.Add(new TranslationAttempt(model, status, "empty", null));
-                return new TranslationOutcome(false, null, null, model, false, $"Empty content from {model}", attempts);
+                const string diag = "no usable text in the response (no output_text delta or completed output in the SSE stream)";
+                attempts.Add(new TranslationAttempt(model, status, "empty", diag));
+                return new TranslationOutcome(false, null, null, model, false,
+                    $"ChatGPT returned HTTP {status} but {diag} on {model}.", attempts);
             }
 
             if (TranslationParsing.TryParseTranslation(content, out var title, out var html))
@@ -175,9 +178,17 @@ public class ChatGptTranslator
     }
 
     /// <summary>
-    /// Read the Responses SSE stream and reconstruct the assistant's text. We accumulate
-    /// <c>response.output_text.delta</c> chunks and, as a fallback, read the final text out of the
-    /// <c>response.completed</c> event. A <c>response.failed</c>/<c>error</c> event returns an error.
+    /// Read the Responses SSE stream and reconstruct the assistant's text. The Codex endpoint always
+    /// streams (we send <c>stream=true</c>) but frequently OMITS the Content-Type header, so we parse the
+    /// SSE framing directly instead of trusting the header.
+    ///
+    /// We ignore <c>event:</c> lines (and other SSE fields like <c>id:</c>/comments) — the JSON payload's
+    /// own <c>type</c> is authoritative — and read the <c>data:</c> frames, tolerating CRLF or LF line
+    /// endings and <c>[DONE]</c>. Text comes primarily from the accumulated
+    /// <c>response.output_text.delta</c> chunks; <c>response.output_text.done</c> and
+    /// <c>response.completed</c>/<c>response.incomplete</c> are used only as fallbacks. A
+    /// <c>response.failed</c>/<c>error</c> event returns an error. If the body contains no SSE frames at
+    /// all, we fall back to parsing it as a single (non-streamed) Responses JSON object.
     /// </summary>
     private static async Task<(string? Content, string? Error)> ReadResponsesStreamAsync(HttpResponseMessage resp, CancellationToken ct)
     {
@@ -186,15 +197,24 @@ public class ChatGptTranslator
 
         var deltas = new StringBuilder();
         string? completedText = null;
+        string? doneText = null;
         string? error = null;
+        var sawSseData = false;
+        var raw = new StringBuilder(); // retained only until SSE is confirmed, for a non-SSE JSON fallback
 
         while (true)
         {
-            var line = await reader.ReadLineAsync(ct);
+            var line = await reader.ReadLineAsync(ct); // ReadLineAsync handles both LF and CRLF endings
             if (line is null) break;
-            line = line.TrimEnd('\r');
-            if (line.Length == 0 || !line.StartsWith("data:", StringComparison.Ordinal)) continue;
+            if (!sawSseData) raw.Append(line).Append('\n');
 
+            line = line.TrimEnd('\r');
+            if (line.Length == 0) continue;
+
+            // Only "data:" carries a payload; skip "event:", "id:", ":comment", etc.
+            if (!line.StartsWith("data:", StringComparison.Ordinal)) continue;
+
+            sawSseData = true;
             var data = line["data:".Length..].Trim();
             if (data.Length == 0 || data == "[DONE]") continue;
 
@@ -212,6 +232,10 @@ public class ChatGptTranslator
                         if (root.TryGetProperty("delta", out var d) && d.ValueKind == JsonValueKind.String)
                             deltas.Append(d.GetString());
                         break;
+                    case "response.output_text.done":
+                        if (root.TryGetProperty("text", out var dt) && dt.ValueKind == JsonValueKind.String)
+                            doneText = dt.GetString() ?? doneText;
+                        break;
                     case "response.completed":
                     case "response.incomplete":
                         if (root.TryGetProperty("response", out var respEl))
@@ -226,14 +250,23 @@ public class ChatGptTranslator
         }
 
         if (error is not null) return (null, error);
-        var text = deltas.Length > 0 ? deltas.ToString() : completedText;
-        return (text, null);
+
+        // Primary: streamed deltas. Fallbacks: the done event's text, then the completed output.
+        var text = deltas.Length > 0 ? deltas.ToString() : (completedText ?? doneText);
+        if (!string.IsNullOrEmpty(text)) return (text, null);
+
+        // No SSE data frames at all — treat the body as one non-streamed Responses JSON object.
+        if (!sawSseData) return ParseResponsesJson(raw.ToString());
+
+        return (null, null); // 200 SSE but no usable text — caller emits a clear diagnostic
     }
 
-    /// <summary>Fallback: the backend replied with a single (non-streamed) Responses JSON object.</summary>
-    private static async Task<(string? Content, string? Error)> ReadResponsesJsonAsync(HttpResponseMessage resp, CancellationToken ct)
+    /// <summary>
+    /// Fallback parser for a single (non-streamed) Responses JSON object, used only when the body had no
+    /// SSE framing. Returns the extracted output text, or the API error message when the object is an error.
+    /// </summary>
+    private static (string? Content, string? Error) ParseResponsesJson(string body)
     {
-        var body = await resp.Content.ReadAsStringAsync(ct);
         if (string.IsNullOrWhiteSpace(body)) return (null, null);
         try
         {
