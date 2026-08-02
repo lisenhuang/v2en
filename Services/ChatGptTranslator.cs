@@ -33,44 +33,13 @@ public class ChatGptTranslator
         string accountId,
         string model,
         string? reasoningEffort,
-        int maxOutputTokens,
         CancellationToken ct)
     {
         var attempts = new List<TranslationAttempt>();
         if (string.IsNullOrWhiteSpace(model))
             return new TranslationOutcome(false, null, null, null, false, "No ChatGPT model configured", attempts);
 
-        var userJson = JsonSerializer.Serialize(new { title = titleZh, content = contentHtmlZh });
-        var effort = NormalizeEffort(reasoningEffort);
-
-        // Responses API request body — Codex quirks: store:false and non-empty instructions are required;
-        // include reasoning.encrypted_content whenever we ask for reasoning so a stored:false turn is valid.
-        var body = new Dictionary<string, object?>
-        {
-            ["model"] = model,
-            ["instructions"] = TranslationParsing.SystemPrompt,
-            ["input"] = new object[]
-            {
-                new
-                {
-                    type = "message",
-                    role = "user",
-                    content = new object[] { new { type = "input_text", text = userJson } },
-                },
-            },
-            ["tools"] = Array.Empty<object>(),
-            ["tool_choice"] = "auto",
-            ["parallel_tool_calls"] = false,
-            ["store"] = false,
-            ["stream"] = true,
-            ["max_output_tokens"] = maxOutputTokens,
-            ["prompt_cache_key"] = Guid.NewGuid().ToString(),
-        };
-        if (effort is not null)
-        {
-            body["reasoning"] = new { effort, summary = "auto" };
-            body["include"] = new[] { "reasoning.encrypted_content" };
-        }
+        var body = BuildResponsesRequestBody(titleZh, contentHtmlZh, model, reasoningEffort);
 
         try
         {
@@ -156,6 +125,53 @@ public class ChatGptTranslator
             attempts.Add(new TranslationAttempt(model, null, "exception", ClipDetail(ex.ToString())));
             return new TranslationOutcome(false, null, null, model, false, ex.Message, attempts);
         }
+    }
+
+    /// <summary>
+    /// Build the Responses request body for the ChatGPT/Codex subscription backend. This mirrors the
+    /// fields the Codex CLI's <c>ResponsesApiRequest</c> actually sends.
+    ///
+    /// IMPORTANT: it deliberately sends <b>no output-token cap</b>. The Codex CLI sends none, and this
+    /// subscription endpoint (<c>chatgpt.com/backend-api/codex/responses</c>) REJECTS
+    /// <c>max_output_tokens</c> with HTTP 400 "Unsupported parameter: max_output_tokens". (The platform
+    /// Responses API on <c>api.openai.com</c> accepts it, but that's a different endpoint.) So the
+    /// configured MaxOutputTokens setting applies to OpenRouter only — do not add a token-limit field here.
+    ///
+    /// Codex quirks kept: <c>store:false</c> and non-empty <c>instructions</c> are required; when we ask
+    /// for reasoning we also add <c>include:["reasoning.encrypted_content"]</c> so a store:false turn is valid.
+    /// </summary>
+    internal static Dictionary<string, object?> BuildResponsesRequestBody(
+        string titleZh, string contentHtmlZh, string model, string? reasoningEffort)
+    {
+        var userJson = JsonSerializer.Serialize(new { title = titleZh, content = contentHtmlZh });
+        var effort = NormalizeEffort(reasoningEffort);
+
+        var body = new Dictionary<string, object?>
+        {
+            ["model"] = model,
+            ["instructions"] = TranslationParsing.SystemPrompt,
+            ["input"] = new object[]
+            {
+                new
+                {
+                    type = "message",
+                    role = "user",
+                    content = new object[] { new { type = "input_text", text = userJson } },
+                },
+            },
+            ["tools"] = Array.Empty<object>(),
+            ["tool_choice"] = "auto",
+            ["parallel_tool_calls"] = false,
+            ["store"] = false,
+            ["stream"] = true,
+            ["prompt_cache_key"] = Guid.NewGuid().ToString(),
+        };
+        if (effort is not null)
+        {
+            body["reasoning"] = new { effort, summary = "auto" };
+            body["include"] = new[] { "reasoning.encrypted_content" };
+        }
+        return body;
     }
 
     /// <summary>

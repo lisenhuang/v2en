@@ -5,6 +5,8 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UserSecretsId>c83768b6-bbb1-4be7-85d0-05dc144b5f41</UserSecretsId>
+    <!-- The test project lives under tests/; keep it out of the app's own compile/publish globs. -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);tests/**</DefaultItemExcludes>
   </PropertyGroup>
 
   <ItemGroup>
@@ -15,6 +17,11 @@
     </PackageReference>
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.9" />
     <PackageReference Include="Microsoft.Extensions.Http.Resilience" Version="10.7.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Let the test project reach internal helpers (e.g. ChatGptTranslator.BuildResponsesRequestBody). -->
+    <InternalsVisibleTo Include="v2en.Tests" />
   </ItemGroup>
 
 </Project>

@@ -9,5 +9,5 @@ namespace v2en;
 /// </summary>
 public static class AppVersion
 {
-    public const string Stamp = "26.07.15.11:06";
+    public const string Stamp = "26.08.02.09:52";
 }

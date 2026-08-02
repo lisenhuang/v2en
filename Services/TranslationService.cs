@@ -304,9 +304,11 @@ public class TranslationService
                     lastError = "ChatGPT account not connected.";
                     continue;
                 }
+                // NB: no MaxOutputTokens here — the Codex backend rejects max_output_tokens (that setting
+                // applies to OpenRouter only). See ChatGptTranslator.BuildResponsesRequestBody.
                 outcome = await _chatGptTranslator.TranslateAsync(
                     post.TitleZh, post.ContentZhHtml, token.Value.AccessToken, token.Value.AccountId,
-                    step.Model, step.Reasoning, cfg.MaxOutputTokens, ct);
+                    step.Model, step.Reasoning, ct);
             }
             else // OpenRouter
             {
