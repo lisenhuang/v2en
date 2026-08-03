@@ -35,8 +35,8 @@
     @if (Model.HasOriginal)
     {
         @* A real link, not a bare button: without JavaScript it navigates to the server-rendered
-           original, and the URL it points at is shareable. The script cancels the navigation and
-           swaps in place. href = where the click GOES, the address bar = what is currently SHOWN. *@
+           original at ?lang=zh (still a shareable deep-link). With JS the script cancels that
+           navigation and swaps in place WITHOUT changing the URL — toggling never rewrites the address bar. *@
         <div class="post-lang">
             <a id="lang-toggle"
                class="lang-toggle"
