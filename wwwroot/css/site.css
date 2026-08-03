@@ -221,7 +221,7 @@ main.container { flex: 1 0 auto; padding-top: 24px; padding-bottom: 48px; }
 .lang-toggle {
     display: inline-block; padding: 5px 11px; border-radius: 8px;
     border: 1px solid var(--border); background: var(--bg-elev); color: var(--text-muted);
-    font-size: .82rem; font-weight: 600;
+    font-family: inherit; font-size: .82rem; font-weight: 600; cursor: pointer;
 }
 .lang-toggle:hover { border-color: var(--accent); color: var(--text); text-decoration: none; }
 

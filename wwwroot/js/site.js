@@ -34,21 +34,15 @@
     }
 
     // ---------- Post detail: translation ⇄ original ----------
-    // The server renders both versions; the link points at ?lang=zh (a shareable deep-link that also
-    // works with JavaScript off, one navigation later). With JS on we intercept the click and swap in
-    // place — the toggle NEVER changes the address bar; the URL you loaded stays exactly as it was.
+    // The server renders both versions (English shown first); this button swaps which one is visible,
+    // purely client-side. It never navigates and never changes the URL.
     var langToggle = document.getElementById("lang-toggle");
     var post = document.getElementById("post");
     if (langToggle && post) {
-        langToggle.addEventListener("click", function (e) {
-            e.preventDefault();
+        langToggle.addEventListener("click", function () {
             var original = post.classList.toggle("show-original");
-            // Update only the label + the href (the no-JS fallback target). The URL is left untouched
-            // on purpose — toggling is a pure in-place view swap, not a navigation.
             langToggle.textContent = langToggle.getAttribute(
                 original ? "data-label-to-english" : "data-label-to-original");
-            langToggle.setAttribute("href", langToggle.getAttribute(
-                original ? "data-href-english" : "data-href-original"));
         });
     }
 

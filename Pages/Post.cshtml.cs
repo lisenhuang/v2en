@@ -34,16 +34,10 @@ public class PostModel : PageModel
     /// <summary>Whether to offer the original at all — false for a post stored without a body.</summary>
     public bool HasOriginal => OriginalHtml.Length > 0;
 
-    /// <summary>
-    /// True when the page should open on the original instead of the translation, i.e. ?lang=zh.
-    /// The toggle is a real link to that URL, so the original stays shareable and keeps working with
-    /// JavaScript disabled; the script upgrades it to an instant in-place swap.
-    /// </summary>
-    public bool ShowOriginalFirst { get; private set; }
-
-    /// <param name="lang">"zh" opens on the original. Anything else (including absent) opens on the
-    /// English translation, which is what every existing link to this page does.</param>
-    public async Task<IActionResult> OnGetAsync(long id, string? lang)
+    // The page always renders on the English translation; switching to the original is a purely
+    // client-side toggle (see Post.cshtml / site.js). Any query string is ignored — there is no
+    // server-side language mode, so a bookmarked/shared link always opens on English.
+    public async Task<IActionResult> OnGetAsync(long id)
     {
         var post = await _db.Posts.AsNoTracking()
             .FirstOrDefaultAsync(p => p.V2exId == id && p.Status == TranslationStatus.Translated);
@@ -55,7 +49,6 @@ public class PostModel : PageModel
 
         var original = _sanitizer.Sanitize(post.ContentZhHtml);
         OriginalHtml = string.IsNullOrWhiteSpace(original) ? "" : original;
-        ShowOriginalFirst = HasOriginal && string.Equals(lang, "zh", StringComparison.OrdinalIgnoreCase);
 
         return Page();
     }
