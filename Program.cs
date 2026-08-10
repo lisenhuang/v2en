@@ -248,7 +248,7 @@ app.MapStaticAssets();
 app.MapRazorPages();
 
 // English Atom 1.0 feed — same structure as https://www.v2ex.com/index.xml
-// Entry <link> points to original V2EX URLs; feed self/alternate points to our domain.
+// Entry <link> points to v2en mirror URLs; feed self/alternate points to our domain.
 app.MapGet("/index.xml", async (
     AppDbContext db,
     IOptions<SiteOptions> siteOpts,
