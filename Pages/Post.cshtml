@@ -2,8 +2,6 @@
 @model PostModel
 @{
     var titleEn = Model.Post.TitleEn ?? Model.Post.TitleZh;
-    // Title/description/canonical stay on the English translation whichever version is showing: the
-    // page is the same document either way, and the canonical already points at V2EX itself.
     ViewData["Title"] = titleEn;
     ViewData["Description"] = HtmlText.Preview(Model.Post.ContentEnHtml, 160);
     ViewData["Canonical"] = Model.Post.SourceUrl;
@@ -12,7 +10,6 @@
     const string labelToEnglish = "Show English translation";
 }
 
-@* Both versions are rendered; the show-original class (toggled client-side) decides which is visible. *@
 <article id="post" class="post">
     <a class="back-link" href="/">← Home</a>
 
@@ -30,25 +27,27 @@
         <time datetime="@Model.Post.Published.ToString("o")">@Model.Post.Published.UtcDateTime.ToString("yyyy-MM-dd HH:mm")Z</time>
     </div>
 
-    @if (Model.HasOriginal)
-    {
-        @* A pure client-side toggle: it swaps the rendered original ⇄ translation in place and never
-           navigates or touches the URL. The page always loads on the English translation. *@
-        <div class="post-lang">
-            <button type="button"
-                    id="lang-toggle"
-                    class="lang-toggle"
-                    data-label-to-original="@labelToOriginal"
-                    data-label-to-english="@labelToEnglish">@labelToOriginal</button>
-        </div>
-    }
+    <div class="post-lang">
+        <button type="button"
+                id="lang-toggle"
+                class="lang-toggle"
+                data-label-to-original="@labelToOriginal"
+                data-label-to-english="@labelToEnglish">@labelToOriginal</button>
+    </div>
 
     <div class="post-content lang-en" lang="en">
-        @Html.Raw(Model.Post.ContentEnHtml)
+        @if (string.IsNullOrWhiteSpace(Model.Post.ContentEnHtml))
+        {
+            <p>No translated content is available for this post yet.</p>
+        }
+        else
+        {
+            @Html.Raw(Model.Post.ContentEnHtml)
+        }
     </div>
+
     @if (Model.HasOriginal)
     {
-        @* Sanitized in the page model — this is the only place raw V2EX HTML reaches a browser. *@
         <div class="post-content lang-zh" lang="zh-Hans">
             @Html.Raw(Model.OriginalHtml)
         </div>
