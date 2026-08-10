@@ -9,7 +9,7 @@ namespace v2en.Services;
 /// <summary>
 /// Builds our English Atom 1.0 feed, reproducing V2EX's exact structure:
 /// same XML declaration, default Atom namespace, element set, ordering, attributes,
-/// and CDATA-wrapped HTML content. Per-entry &lt;link&gt; points to the original v2ex URL;
+/// and CDATA-wrapped HTML content. Per-entry &lt;link&gt; points to the corresponding v2en mirror URL;
 /// feed-level self/alternate point to our own domain.
 /// </summary>
 public static class FeedXmlWriter
@@ -50,7 +50,7 @@ public static class FeedXmlWriter
                 w.WriteStartElement("entry", AtomNs);
 
                 WriteSimple(w, "title", p.TitleEn ?? p.TitleZh);
-                WriteLink(w, "alternate", "text/html", p.SourceUrl);     // original v2ex URL
+                WriteLink(w, "alternate", "text/html", $"{baseUrl}/t/{p.V2exId}"); // v2en mirror URL
                 WriteSimple(w, "id", p.SourceTagId);                     // original tag: id
                 WriteSimple(w, "published", FormatDate(p.Published));
                 WriteSimple(w, "updated", FormatDate(p.Updated));
