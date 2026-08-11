@@ -91,5 +91,32 @@ public class RuntimeSettings
     /// <summary>Account email/label if present in the id token — display only.</summary>
     public string ChatGptAccountLabel { get; set; } = "";
 
+    // ── Web analytics (privacy-preserving page-view counting) ─────────────────────
+    /// <summary>
+    /// Master switch for recording page views. Defaults to ON — collection is passive, never blocks
+    /// a request, and stores no raw IP addresses. Turn it off to stop recording entirely (existing
+    /// rows are kept and stay visible in the dashboard until the retention window prunes them).
+    /// </summary>
+    public bool EnableAnalytics { get; set; } = true;
+
+    /// <summary>
+    /// How many days of page views to keep. Older rows are pruned hourly by the analytics writer.
+    /// 0 (or negative) disables pruning and keeps everything.
+    /// </summary>
+    public int AnalyticsRetentionDays { get; set; } = 90;
+
+    /// <summary>
+    /// Secret key for the one-way visitor hash. Generated on first startup and never shown in the UI
+    /// — it is what makes <see cref="AnalyticsEvent.VisitorHash"/> irreversible. Rotating it simply
+    /// makes previously-recorded visitors count as new ones.
+    /// </summary>
+    public string AnalyticsSalt { get; set; } = "";
+
+    /// <summary>When true (default), requests sending <c>DNT: 1</c> or <c>Sec-GPC: 1</c> are not recorded.</summary>
+    public bool AnalyticsRespectDoNotTrack { get; set; } = true;
+
+    /// <summary>When true, /admin page views are recorded too. Off by default so your own visits don't skew the numbers.</summary>
+    public bool AnalyticsIncludeAdmin { get; set; }
+
     public DateTimeOffset? UpdatedUtc { get; set; }
 }

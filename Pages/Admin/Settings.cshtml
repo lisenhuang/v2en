@@ -433,6 +433,52 @@
         </div>
     </div>
 
+    <div class="card">
+        <h2>Analytics</h2>
+        <p class="hint" style="margin-top:-8px">
+            Page views are counted from Cloudflare's edge headers and shown in
+            <a asp-page="/Admin/Analytics">Analytics</a>. <strong>No IP address is ever stored</strong> —
+            visitors are identified only by a one-way hash that changes every day.
+        </p>
+        <div class="field">
+            <label class="check">
+                <input type="checkbox" asp-for="EnableAnalytics" />
+                <span>
+                    <strong>Record page views</strong>
+                    <span class="hint" style="display:block">
+                        Collection happens off the request path, so it never slows down or breaks a page.
+                        Turning this off stops new rows; existing ones stay until retention prunes them.
+                    </span>
+                </span>
+            </label>
+        </div>
+        <div class="field">
+            <label class="check">
+                <input type="checkbox" asp-for="AnalyticsRespectDoNotTrack" />
+                <span>
+                    <strong>Honour Do Not Track / Global Privacy Control</strong>
+                    <span class="hint" style="display:block">Skip visitors who send <span class="mono">DNT: 1</span> or <span class="mono">Sec-GPC: 1</span>.</span>
+                </span>
+            </label>
+        </div>
+        <div class="field">
+            <label class="check">
+                <input type="checkbox" asp-for="AnalyticsIncludeAdmin" />
+                <span>
+                    <strong>Count admin pages too</strong>
+                    <span class="hint" style="display:block">Off by default so your own dashboard visits don't skew the numbers.</span>
+                </span>
+            </label>
+        </div>
+        <div class="form-grid">
+            <div class="field">
+                <label asp-for="AnalyticsRetentionDays">Keep data for (days)</label>
+                <p class="hint">Older page views are pruned hourly. Use 0 to keep everything forever.</p>
+                <input type="number" asp-for="AnalyticsRetentionDays" min="0" max="3650" />
+            </div>
+        </div>
+    </div>
+
     <div class="btn-row">
         <button type="submit" class="btn btn-primary">Save settings</button>
     </div>

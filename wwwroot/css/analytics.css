@@ -1,0 +1,143 @@
+/* ===== Analytics dashboard — layered on site.css tokens + admin.css primitives ===== */
+
+:root {
+    --an-views: var(--accent);
+    --an-visitors: #6366f1;
+    --an-land: #dfe3ea;
+    --an-water: transparent;
+    --an-grid: color-mix(in srgb, var(--border) 70%, transparent);
+}
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme]) { --an-visitors: #a5b4fc; --an-land: #232936; }
+}
+:root[data-theme="dark"] { --an-visitors: #a5b4fc; --an-land: #232936; }
+
+/* The dashboard needs more room than the form-heavy admin pages. */
+body.admin { --admin-maxw: 1180px; }
+
+/* The script shows and hides the error/empty cards with the `hidden` property. The UA stylesheet's
+   [hidden] { display: none } is a type-selector rule, so any class rule below that sets `display`
+   would out-specify it and leave a "hidden" element on screen — this keeps hidden meaning hidden. */
+[hidden] { display: none !important; }
+
+/* ---------- Toolbar ---------- */
+.an-toolbar { row-gap: 12px; }
+.an-ranges { display: flex; flex-wrap: wrap; gap: 6px; }
+.an-range.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+.an-dates { display: inline-flex; align-items: center; gap: 7px; font-size: .86rem; }
+.an-dates input[type="date"] {
+    width: auto; padding: 6px 9px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--bg); color: var(--text); font: inherit; font-size: .86rem;
+    color-scheme: light dark;
+}
+.an-check { display: inline-flex; align-items: center; gap: 7px; font-size: .88rem; color: var(--text-muted); cursor: pointer; }
+.an-check input { width: 16px; height: 16px; accent-color: var(--accent); }
+
+.an-error { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.an-error .btn { margin-left: auto; }
+
+/* ---------- Metric tiles ---------- */
+.an-stats { margin-bottom: 20px; }
+.an-stats .value { font-variant-numeric: tabular-nums; }
+.an-delta { font-weight: 600; font-variant-numeric: tabular-nums; }
+.an-delta.up { color: var(--ok); }
+.an-delta.down { color: var(--err); }
+.an-delta.flat { color: var(--text-muted); }
+
+/* ---------- Trend chart ---------- */
+.an-legend { display: flex; align-items: center; gap: 14px; font-size: .82rem; color: var(--text-muted); }
+.an-key { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.an-key::before { content: ""; width: 10px; height: 10px; border-radius: 3px; background: currentColor; }
+.an-key-views { color: var(--an-views); }
+.an-key-visitors { color: var(--an-visitors); }
+
+.an-chart { position: relative; width: 100%; }
+.an-chart svg { display: block; max-width: 100%; overflow: visible; }
+.an-chart .an-axis { fill: var(--text-muted); font-size: 10px; }
+.an-chart .an-gridline { stroke: var(--an-grid); stroke-width: 1; shape-rendering: crispEdges; }
+.an-chart .an-area { fill: url(#an-area-fill); }
+/* Gradient stops are styled here (not as attributes) so they can read the theme tokens. */
+.an-chart .an-stop-top { stop-color: var(--an-views); stop-opacity: .28; }
+.an-chart .an-stop-bottom { stop-color: var(--an-views); stop-opacity: 0; }
+.an-chart .an-line-views { fill: none; stroke: var(--an-views); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.an-chart .an-line-visitors { fill: none; stroke: var(--an-visitors); stroke-width: 1.75; stroke-dasharray: 4 3; stroke-linejoin: round; }
+.an-chart .an-hit { fill: transparent; cursor: crosshair; }
+.an-chart .an-hit:hover { fill: color-mix(in srgb, var(--accent) 10%, transparent); }
+.an-chart .an-marker { fill: var(--an-views); stroke: var(--card); stroke-width: 2; }
+
+.an-tooltip {
+    position: absolute; z-index: 5; pointer-events: none;
+    background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+    box-shadow: var(--shadow); padding: 8px 11px; font-size: .82rem; min-width: 130px;
+    transform: translate(-50%, -100%); transition: opacity .08s linear;
+}
+.an-tooltip b { display: block; margin-bottom: 4px; font-size: .8rem; color: var(--text-muted); font-weight: 600; }
+.an-tooltip .an-tip-row { display: flex; justify-content: space-between; gap: 14px; font-variant-numeric: tabular-nums; }
+.an-tooltip .an-tip-row i { font-style: normal; color: var(--text-muted); }
+
+/* ---------- Map ---------- */
+.an-map { position: relative; width: 100%; }
+.an-map svg { display: block; width: 100%; height: auto; }
+.an-map .an-land { fill: var(--an-land); stroke: none; }
+.an-map .an-point { fill: color-mix(in srgb, var(--accent) 78%, transparent); stroke: var(--accent); stroke-width: 1; }
+.an-map .an-point.approx { fill: color-mix(in srgb, var(--accent) 18%, transparent); stroke-dasharray: 2.5 2; }
+.an-map .an-point:hover { fill: var(--accent); }
+.an-map-legend { font-size: .8rem; margin: 10px 0 0; }
+.an-map-note { font-size: .84rem; }
+.an-map-empty { text-align: center; color: var(--text-muted); padding: 46px 0; }
+
+/* ---------- Breakdown lists ---------- */
+.an-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px; }
+.an-grid .card { margin-bottom: 0; }
+
+.an-list { display: flex; flex-direction: column; gap: 2px; }
+.an-row {
+    position: relative; display: flex; align-items: center; gap: 10px;
+    padding: 7px 10px; border-radius: 8px; font-size: .9rem; overflow: hidden;
+}
+/* The share bar is a background layer so the label always sits on top and stays readable. */
+.an-row .an-bar {
+    position: absolute; inset: 0 auto 0 0; z-index: 0;
+    background: color-mix(in srgb, var(--accent) 14%, transparent);
+    border-radius: 8px;
+}
+.an-row > * { position: relative; z-index: 1; }
+.an-row .an-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.an-row .an-flag { font-size: 1.05rem; line-height: 1; }
+.an-row .an-count { font-variant-numeric: tabular-nums; font-weight: 600; }
+.an-row .an-sub { color: var(--text-muted); font-size: .78rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.an-row a { color: var(--text); }
+.an-list .empty { padding: 26px 0; }
+
+.an-tabs { display: inline-flex; gap: 4px; }
+.an-tab {
+    border: 1px solid var(--border); background: var(--bg); color: var(--text-muted);
+    border-radius: 999px; padding: 3px 10px; font: inherit; font-size: .78rem; font-weight: 600; cursor: pointer;
+}
+.an-tab:hover { color: var(--text); }
+.an-tab.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+/* ---------- Recent visits ---------- */
+.an-recent td { vertical-align: middle; }
+.an-recent .an-visitor {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .78rem;
+    background: var(--bg-elev); border-radius: 6px; padding: 2px 7px; color: var(--text-muted);
+}
+.an-recent .an-bot { margin-left: 6px; }
+.an-footnote { font-size: .82rem; margin-top: 18px; }
+
+/* ---------- Loading ---------- */
+.an-loading { opacity: .45; transition: opacity .12s linear; }
+.an-skeleton {
+    height: 12px; border-radius: 6px; background: var(--bg-elev);
+    animation: an-pulse 1.25s ease-in-out infinite;
+}
+@keyframes an-pulse { 0%, 100% { opacity: .5; } 50% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .an-skeleton { animation: none; } }
+
+@media (max-width: 720px) {
+    .an-toolbar { align-items: flex-start; }
+    .an-dates { flex-wrap: wrap; }
+    .an-chart svg { height: 210px; }
+}

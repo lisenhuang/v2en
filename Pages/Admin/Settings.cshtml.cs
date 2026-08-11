@@ -60,6 +60,12 @@ public class SettingsModel : PageModel
     [BindProperty] public int EmbedMaxPerTick { get; set; }
     [BindProperty] public int EmbedMaxAttempts { get; set; }
 
+    // ── Web analytics ──
+    [BindProperty] public bool EnableAnalytics { get; set; }
+    [BindProperty] public int AnalyticsRetentionDays { get; set; }
+    [BindProperty] public bool AnalyticsRespectDoNotTrack { get; set; }
+    [BindProperty] public bool AnalyticsIncludeAdmin { get; set; }
+
     // ── Chat / retrieval ──
     [BindProperty] public bool EnableChat { get; set; }
     [BindProperty] public string ChatModel { get; set; } = "";
@@ -150,6 +156,12 @@ public class SettingsModel : PageModel
         cfg.ChatMaxContextPosts = Math.Clamp(ChatMaxContextPosts, 1, 30);
         cfg.ChatRateLimitPerMinutePerIp = Math.Clamp(ChatRateLimitPerMinutePerIp, 1, 120);
 
+        // Analytics. Retention is clamped to a decade; 0 is kept as-is and means "never prune".
+        cfg.EnableAnalytics = EnableAnalytics;
+        cfg.AnalyticsRetentionDays = AnalyticsRetentionDays <= 0 ? 0 : Math.Min(AnalyticsRetentionDays, 3650);
+        cfg.AnalyticsRespectDoNotTrack = AnalyticsRespectDoNotTrack;
+        cfg.AnalyticsIncludeAdmin = AnalyticsIncludeAdmin;
+
         cfg.UpdatedUtc = DateTimeOffset.UtcNow;
         await _db.SaveChangesAsync(ct);
 
@@ -188,6 +200,11 @@ public class SettingsModel : PageModel
         RetrievalTopK = cfg.RetrievalTopK;
         ChatMaxContextPosts = cfg.ChatMaxContextPosts;
         ChatRateLimitPerMinutePerIp = cfg.ChatRateLimitPerMinutePerIp;
+
+        EnableAnalytics = cfg.EnableAnalytics;
+        AnalyticsRetentionDays = cfg.AnalyticsRetentionDays;
+        AnalyticsRespectDoNotTrack = cfg.AnalyticsRespectDoNotTrack;
+        AnalyticsIncludeAdmin = cfg.AnalyticsIncludeAdmin;
 
         // Never echo the secrets back into the inputs.
         OpenRouterApiKey = null;

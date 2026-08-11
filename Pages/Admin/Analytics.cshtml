@@ -1,0 +1,196 @@
+@page
+@model v2en.Pages.Admin.AnalyticsModel
+@{
+    ViewData["Title"] = "Analytics";
+}
+
+<h1>Analytics</h1>
+<p class="page-sub">
+    Who is reading the mirror, and where from — measured at Cloudflare's edge.
+    <span class="muted">No IP addresses are stored; visitors are counted with a daily one-way hash.</span>
+</p>
+
+@if (!Model.CollectionEnabled)
+{
+    <div class="alert err">
+        <strong>Collection is off</strong> — no new page views are being recorded. Turn it back on in
+        <a asp-page="/Admin/Settings">Settings → Analytics</a>. Anything already recorded is still shown below.
+    </div>
+}
+
+@* ── Controls ─────────────────────────────────────────────────────────────────── *@
+<div class="toolbar an-toolbar">
+    <div class="an-ranges" role="group" aria-label="Reporting period">
+        <button type="button" class="btn btn-sm an-range" data-range="24h">24 hours</button>
+        <button type="button" class="btn btn-sm an-range" data-range="7d">7 days</button>
+        <button type="button" class="btn btn-sm an-range" data-range="30d">30 days</button>
+        <button type="button" class="btn btn-sm an-range" data-range="90d">90 days</button>
+        <button type="button" class="btn btn-sm an-range" data-range="12mo">12 months</button>
+        <button type="button" class="btn btn-sm an-range" data-range="all">All</button>
+    </div>
+
+    <span class="spacer"></span>
+
+    <label class="an-dates">
+        <span class="muted">From</span>
+        <input type="date" id="an-from" aria-label="From date" />
+        <span class="muted">to</span>
+        <input type="date" id="an-to" aria-label="To date" />
+        <button type="button" class="btn btn-sm" id="an-apply">Apply</button>
+    </label>
+
+    <label class="an-check" title="Crawlers and monitors are excluded from the numbers by default">
+        <input type="checkbox" id="an-bots" />
+        <span>Include bots</span>
+    </label>
+
+    <button type="button" class="btn btn-sm btn-ghost" id="an-refresh" title="Reload">Refresh</button>
+</div>
+
+@* ── Error / empty states (shown by the script; hidden markup keeps them styled + translatable) ── *@
+<div class="alert err an-error" id="an-error" hidden>
+    <strong>Couldn't load analytics.</strong>
+    <span id="an-error-detail"></span>
+    <button type="button" class="btn btn-sm" id="an-retry">Try again</button>
+</div>
+
+<div class="card an-empty-card" id="an-empty" hidden>
+    <p class="empty">
+        @Icons.Svg("search", "icon")
+        <strong>No page views in this period.</strong><br />
+        @if (Model.CollectionEnabled)
+        {
+            <span class="muted">
+                Recording is on (@Model.Recorded queued since startup). Open the public site in another tab,
+                then refresh — or widen the date range.
+            </span>
+        }
+        else
+        {
+            <span class="muted">Recording is currently switched off.</span>
+        }
+    </p>
+</div>
+
+@* ── Headline metrics ─────────────────────────────────────────────────────────── *@
+<div class="stats an-stats" id="an-stats">
+    <div class="stat">
+        <div class="label">Page views</div>
+        <div class="value" data-metric="views">—</div>
+        <div class="sub" data-delta="views"></div>
+    </div>
+    <div class="stat">
+        <div class="label">Visitors</div>
+        <div class="value" data-metric="visitors">—</div>
+        <div class="sub" data-delta="visitors"></div>
+    </div>
+    <div class="stat">
+        <div class="label">Views / visitor</div>
+        <div class="value" data-metric="perVisitor">—</div>
+        <div class="sub muted">engagement depth</div>
+    </div>
+    <div class="stat">
+        <div class="label">Countries</div>
+        <div class="value" data-metric="countries">—</div>
+        <div class="sub muted" data-metric="located"></div>
+    </div>
+    <div class="stat">
+        <div class="label">Bot views</div>
+        <div class="value sm" data-metric="bots">—</div>
+        <div class="sub muted">excluded unless included above</div>
+    </div>
+</div>
+
+@* ── Trend ────────────────────────────────────────────────────────────────────── *@
+<div class="card">
+    <div class="card-head">
+        <h2>Traffic</h2>
+        <span class="an-legend">
+            <span class="an-key an-key-views">Page views</span>
+            <span class="an-key an-key-visitors">Visitors</span>
+            <span class="badge info" id="an-granularity">—</span>
+        </span>
+    </div>
+    <div class="an-chart" id="an-chart" role="img" aria-label="Traffic over the selected period"></div>
+    <div class="an-tooltip" id="an-chart-tip" hidden></div>
+</div>
+
+@* ── Map ──────────────────────────────────────────────────────────────────────── *@
+<div class="card">
+    <div class="card-head">
+        <h2>Where visitors are</h2>
+        <span class="muted an-map-note" id="an-map-note"></span>
+    </div>
+    <div class="an-map" id="an-map"></div>
+    <p class="muted an-map-legend">
+        Circle area is proportional to page views. Solid markers use Cloudflare's city-level
+        coordinates; hollow ones are placed at the country's centre because only a country code was
+        available.
+    </p>
+</div>
+
+@* ── Breakdowns ───────────────────────────────────────────────────────────────── *@
+<div class="an-grid">
+    <div class="card">
+        <div class="card-head"><h2>Countries</h2></div>
+        <div class="an-list" id="an-countries"></div>
+    </div>
+    <div class="card">
+        <div class="card-head"><h2>Top pages</h2></div>
+        <div class="an-list" id="an-pages"></div>
+    </div>
+    <div class="card">
+        <div class="card-head"><h2>Referrers</h2></div>
+        <div class="an-list" id="an-referrers"></div>
+    </div>
+    <div class="card">
+        <div class="card-head">
+            <h2>Devices</h2>
+            <span class="an-tabs" role="tablist">
+                <button type="button" class="an-tab active" data-facet="devices">Type</button>
+                <button type="button" class="an-tab" data-facet="browsers">Browser</button>
+                <button type="button" class="an-tab" data-facet="operatingSystems">OS</button>
+            </span>
+        </div>
+        <div class="an-list" id="an-devices"></div>
+    </div>
+</div>
+
+@* ── Recent visits ────────────────────────────────────────────────────────────── *@
+<div class="card">
+    <div class="card-head">
+        <h2>Recent visits</h2>
+        <span class="muted">newest 50 · times shown in your local timezone</span>
+    </div>
+    <div class="db-scroll">
+        <table class="table an-recent">
+            <thead>
+                <tr>
+                    <th class="nowrap">When</th>
+                    <th>Page</th>
+                    <th>Location</th>
+                    <th>Client</th>
+                    <th>Referrer</th>
+                    <th class="nowrap">Visitor</th>
+                    <th class="nowrap">Status</th>
+                </tr>
+            </thead>
+            <tbody id="an-recent"></tbody>
+        </table>
+    </div>
+</div>
+
+<p class="muted an-footnote" id="an-footnote">
+    Retention: @(Model.RetentionDays > 0 ? $"{Model.RetentionDays} days" : "unlimited").
+    @(Model.RespectDoNotTrack ? "Do Not Track / Global Privacy Control requests are skipped." : "")
+    @(Model.IncludeAdmin ? "Admin pages are counted." : "Admin pages are not counted.")
+</p>
+
+@section Styles {
+    <link rel="stylesheet" href="~/css/analytics.css" asp-append-version="true" />
+}
+
+@section Scripts {
+    <script src="~/js/world-outline.js" asp-append-version="true"></script>
+    <script src="~/js/admin-analytics.js" asp-append-version="true"></script>
+}

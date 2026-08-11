@@ -6,6 +6,7 @@ using Microsoft.Extensions.Options;
 using System.Text;
 using v2en.Configuration;
 using v2en.Data;
+using v2en.Middleware;
 using v2en.Services;
 using v2en.Workers;
 
@@ -87,6 +88,11 @@ builder.Services.AddScoped<PostDetailsService>();
 builder.Services.AddHostedService<FeedWorker>();
 builder.Services.AddMemoryCache();
 
+// ── Web analytics: queue page views on the request path, write + report off it ────
+builder.Services.AddSingleton<AnalyticsRecorder>();
+builder.Services.AddHostedService<AnalyticsWriter>();
+builder.Services.AddScoped<AnalyticsReportService>();
+
 // ── Admin auth: cookie-based, credentials in the DB (AdminUser) ──────────────────
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
     .AddCookie(options =>
@@ -99,6 +105,30 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
         options.Cookie.Name = "v2en_admin";
         options.Cookie.HttpOnly = true;
         options.Cookie.SameSite = SameSiteMode.Lax;
+
+        // A browser navigating to a protected PAGE should be redirected to the login form, but an
+        // admin fetch() to /api/... wants a status code it can act on — a 302 to an HTML login page
+        // would otherwise surface as a confusing parse error in the dashboard.
+        options.Events.OnRedirectToLogin = ctx =>
+        {
+            if (ctx.Request.Path.StartsWithSegments("/api"))
+            {
+                ctx.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                return Task.CompletedTask;
+            }
+            ctx.Response.Redirect(ctx.RedirectUri);
+            return Task.CompletedTask;
+        };
+        options.Events.OnRedirectToAccessDenied = ctx =>
+        {
+            if (ctx.Request.Path.StartsWithSegments("/api"))
+            {
+                ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
+                return Task.CompletedTask;
+            }
+            ctx.Response.Redirect(ctx.RedirectUri);
+            return Task.CompletedTask;
+        };
     });
 builder.Services.AddAuthorization();
 
@@ -134,6 +164,10 @@ app.UseStaticFiles();
 app.UseRouting();
 app.UseAuthentication();
 app.UseAuthorization();
+
+// Records public page views (never blocks the request, never stores a raw IP). Sits after auth so
+// it sees the final status code, and after UseStaticFiles so asset hits are already short-circuited.
+app.UseWebAnalytics();
 
 // ── Run EF migrations, set WAL mode, seed runtime settings + initial admin ───────
 using (var scope = app.Services.CreateScope())
@@ -492,8 +526,57 @@ app.MapPost("/api/live/post", async (
     });
 });
 
+// ── Admin-only analytics API — the data behind /admin/analytics ──────────────────
+// RequireAuthorization() gates it on the same admin cookie the dashboard pages use, so an anonymous
+// (or merely curious) caller gets 401 and no data at all. The payload contains no IP addresses:
+// visitors are represented only by a prefix of the rotating one-way hash (see VisitorHasher).
+app.MapGet("/api/admin/analytics", async (
+    AnalyticsReportService reports,
+    AnalyticsRecorder recorder,
+    HttpRequest request,
+    CancellationToken ct) =>
+{
+    var query = request.Query;
+    var range = AnalyticsReportService.ResolveRange(
+        query["range"],
+        ParseDate(query["from"]),
+        ParseDate(query["to"]),
+        ParseInt(query["offset"]) ?? 0,
+        DateTimeOffset.UtcNow);
+
+    var includeBots = query["bots"] == "1" || string.Equals(query["bots"], "true", StringComparison.OrdinalIgnoreCase);
+
+    var report = await reports.BuildAsync(range, includeBots, recorder.Snapshot, ct);
+    return Results.Ok(new
+    {
+        report.Range,
+        report.Totals,
+        report.Series,
+        report.Countries,
+        report.Map,
+        report.Pages,
+        report.Referrers,
+        report.Devices,
+        report.Browsers,
+        report.OperatingSystems,
+        report.Recent,
+        report.IncludeBots,
+        report.CollectionEnabled,
+        report.RetentionDays,
+        queueDropped = recorder.Dropped,
+        generatedUtc = DateTimeOffset.UtcNow,
+    });
+}).RequireAuthorization();
+
 await app.RunAsync();
 return 0;
+
+/// <summary>A "yyyy-MM-dd" query value, or null when absent/malformed (the range then falls back).</summary>
+static DateOnly? ParseDate(string? value) =>
+    DateOnly.TryParse(value, System.Globalization.CultureInfo.InvariantCulture, out var d) ? d : null;
+
+static int? ParseInt(string? value) =>
+    int.TryParse(value, System.Globalization.CultureInfo.InvariantCulture, out var i) ? i : null;
 
 // Heuristic: a question is "predominantly CJK" (Chinese/Japanese/Korean) when CJK letters are at
 // least half of its letters — a strong signal it isn't English. Conservative on purpose so an

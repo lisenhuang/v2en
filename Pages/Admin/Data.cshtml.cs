@@ -45,7 +45,13 @@ public class DataModel : PageModel
     private static readonly Dictionary<string, HashSet<string>> Redacted = new(StringComparer.OrdinalIgnoreCase)
     {
         ["AdminUsers"] = new(StringComparer.OrdinalIgnoreCase) { "PasswordHash" },
-        ["RuntimeSettings"] = new(StringComparer.OrdinalIgnoreCase) { "OpenRouterApiKey", "GeminiEmbedKeysJson" },
+        // AnalyticsSalt is the key that keeps the visitor hash irreversible — showing it here would
+        // let anyone with dashboard access brute-force the (small) IPv4 space against stored hashes.
+        ["RuntimeSettings"] = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "OpenRouterApiKey", "GeminiEmbedKeysJson", "AnalyticsSalt",
+            "ChatGptAccessToken", "ChatGptRefreshToken", "ChatGptIdToken",
+        },
     };
 
     private const int MaxCellChars = 400;   // long blobs/JSON/text are clipped for display only

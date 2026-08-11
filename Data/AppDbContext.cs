@@ -13,6 +13,7 @@ public class AppDbContext : DbContext
     public DbSet<RuntimeSettings> RuntimeSettings => Set<RuntimeSettings>();
     public DbSet<TranslationLog> TranslationLogs => Set<TranslationLog>();
     public DbSet<PostEmbedding> PostEmbeddings => Set<PostEmbedding>();
+    public DbSet<AnalyticsEvent> AnalyticsEvents => Set<AnalyticsEvent>();
 
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
     {
@@ -61,6 +62,28 @@ public class AppDbContext : DbContext
            .OnDelete(DeleteBehavior.Cascade);
         emb.Property(e => e.Model).HasMaxLength(128);
         emb.Property(e => e.SourceContentHash).HasMaxLength(64);
+
+        var hit = modelBuilder.Entity<AnalyticsEvent>();
+        // Every report filters on a time range, and almost every one also excludes bots — a single
+        // composite index serves both (IsBot first because it has two values, so the range stays
+        // contiguous), with a plain Utc index for the reports that DO include bots.
+        hit.HasIndex(e => e.Utc);
+        hit.HasIndex(e => new { e.IsBot, e.Utc });
+        hit.Property(e => e.Path).HasMaxLength(512);
+        hit.Property(e => e.Method).HasMaxLength(8);
+        hit.Property(e => e.VisitorHash).HasMaxLength(32);
+        hit.Property(e => e.Country).HasMaxLength(2);
+        hit.Property(e => e.Continent).HasMaxLength(2);
+        hit.Property(e => e.Region).HasMaxLength(96);
+        hit.Property(e => e.City).HasMaxLength(96);
+        hit.Property(e => e.Timezone).HasMaxLength(64);
+        hit.Property(e => e.EdgeColo).HasMaxLength(8);
+        hit.Property(e => e.ReferrerHost).HasMaxLength(255);
+        hit.Property(e => e.ReferrerUrl).HasMaxLength(512);
+        hit.Property(e => e.UserAgent).HasMaxLength(320);
+        hit.Property(e => e.Browser).HasMaxLength(32);
+        hit.Property(e => e.Os).HasMaxLength(32);
+        hit.Property(e => e.DeviceType).HasMaxLength(16);
     }
 
     /// <summary>
