@@ -206,6 +206,8 @@ main.container { flex: 1 0 auto; padding-top: 24px; padding-bottom: 48px; }
 }
 .post-content ul, .post-content ol { padding-left: 1.4em; }
 .post-content hr { border: none; border-top: 1px solid var(--border); margin: 1.5em 0; }
+/* Stand-in for a body the post doesn't have — reads as a note, not as post text. */
+.post-content .post-empty { color: var(--text-muted); font-style: italic; }
 
 .post-footer { margin-top: 28px; padding-top: 18px; border-top: 1px solid var(--border); }
 .source-link { font-weight: 600; }
