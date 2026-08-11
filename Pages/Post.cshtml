@@ -27,13 +27,16 @@
         <time datetime="@Model.Post.Published.ToString("o")">@Model.Post.Published.UtcDateTime.ToString("yyyy-MM-dd HH:mm")Z</time>
     </div>
 
-    <div class="post-lang">
-        <button type="button"
-                id="lang-toggle"
-                class="lang-toggle"
-                data-label-to-original="@labelToOriginal"
-                data-label-to-english="@labelToEnglish">@labelToOriginal</button>
-    </div>
+    @if (Model.HasOriginal)
+    {
+        <div class="post-lang">
+            <button type="button"
+                    id="lang-toggle"
+                    class="lang-toggle"
+                    data-label-to-original="@labelToOriginal"
+                    data-label-to-english="@labelToEnglish">@labelToOriginal</button>
+        </div>
+    }
 
     <div class="post-content lang-en" lang="en">
         @if (string.IsNullOrWhiteSpace(Model.Post.ContentEnHtml))
