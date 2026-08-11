@@ -1,7 +1,7 @@
 @page "/t/{id:long}"
 @model PostModel
 @{
-    var titleEn = Model.Post.TitleEn ?? Model.Post.TitleZh;
+    var titleEn = Model.TitleEnDisplay;
     ViewData["Title"] = titleEn;
     ViewData["Description"] = HtmlText.Preview(Model.Post.ContentEnHtml, 160);
     ViewData["Canonical"] = Model.Post.SourceUrl;
@@ -17,7 +17,7 @@
         <span class="lang-en" lang="en">@titleEn</span>
         @if (Model.HasOriginal)
         {
-            <span class="lang-zh" lang="zh-Hans">@Model.Post.TitleZh</span>
+            <span class="lang-zh" lang="zh-Hans">@Model.OriginalTitle</span>
         }
     </h1>
 
@@ -27,6 +27,8 @@
         <time datetime="@Model.Post.Published.ToString("o")">@Model.Post.Published.UtcDateTime.ToString("yyyy-MM-dd HH:mm")Z</time>
     </div>
 
+    @* Offered whenever the original has anything the English view doesn't — a title-only post counts,
+       its title IS the post. Both sides below always render something, so the flip is never blank. *@
     @if (Model.HasOriginal)
     {
         <div class="post-lang">
@@ -39,20 +41,31 @@
     }
 
     <div class="post-content lang-en" lang="en">
-        @if (string.IsNullOrWhiteSpace(Model.Post.ContentEnHtml))
+        @if (Model.HasTranslatedBody)
         {
-            <p>No translated content is available for this post yet.</p>
+            @Html.Raw(Model.Post.ContentEnHtml)
+        }
+        else if (Model.IsTitleOnly)
+        {
+            <p class="post-empty">This post has no body — the title is the whole post.</p>
         }
         else
         {
-            @Html.Raw(Model.Post.ContentEnHtml)
+            <p class="post-empty">No translated content is available for this post yet.</p>
         }
     </div>
 
     @if (Model.HasOriginal)
     {
         <div class="post-content lang-zh" lang="zh-Hans">
-            @Html.Raw(Model.OriginalHtml)
+            @if (Model.HasOriginalBody)
+            {
+                @Html.Raw(Model.OriginalHtml)
+            }
+            else
+            {
+                <p class="post-empty">本主题没有正文，只有标题。</p>
+            }
         </div>
     }
 

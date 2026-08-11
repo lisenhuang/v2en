@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc.RazorPages;
 using Microsoft.EntityFrameworkCore;
 using v2en.Data;
 using v2en.Services;
+using v2en.Utilities;
 
 namespace v2en.Pages;
 
@@ -31,8 +32,43 @@ public class PostModel : PageModel
     /// </summary>
     public string OriginalHtml { get; private set; } = "";
 
-    /// <summary>Whether to offer the original at all — false for a post stored without a body.</summary>
-    public bool HasOriginal => OriginalHtml.Length > 0;
+    /// <summary>The heading shown by default: the translation, falling back to the original title.</summary>
+    public string TitleEnDisplay =>
+        string.IsNullOrWhiteSpace(Post.TitleEn) ? Post.TitleZh : Post.TitleEn!;
+
+    /// <summary>
+    /// The heading shown in original mode. Falls back to the English one so the toggle can never leave
+    /// the page without a title (the bug in #22).
+    /// </summary>
+    public string OriginalTitle =>
+        string.IsNullOrWhiteSpace(Post.TitleZh) ? TitleEnDisplay : Post.TitleZh;
+
+    /// <summary>Whether the original has a body to render — false for a post stored without one.</summary>
+    public bool HasOriginalBody => OriginalHtml.Length > 0;
+
+    /// <summary>Whether the translated body has anything to render.</summary>
+    public bool HasTranslatedBody => !HtmlText.IsBlank(Post.ContentEnHtml);
+
+    /// <summary>
+    /// Whether the original title says something the English heading doesn't. An identical title means
+    /// the translator passed it through unchanged (or fell back to it), so flipping shows nothing new.
+    /// </summary>
+    public bool HasOriginalTitle =>
+        !string.IsNullOrWhiteSpace(Post.TitleZh) &&
+        !string.Equals(Post.TitleZh.Trim(), TitleEnDisplay.Trim(), StringComparison.Ordinal);
+
+    /// <summary>
+    /// Whether to offer the original at all. A title-only post — very common on V2EX, where the title
+    /// IS the post — still has an original title worth showing, so the body alone must not decide this
+    /// (#25). The toggle disappears only when the original would be identical to what's already shown.
+    /// </summary>
+    public bool HasOriginal => HasOriginalBody || HasOriginalTitle;
+
+    /// <summary>
+    /// True when the post has no body in EITHER language: nothing is missing, the title is the post.
+    /// Distinguishes that from a real translation gap, which is worth telling the reader about.
+    /// </summary>
+    public bool IsTitleOnly => !HasOriginalBody && !HasTranslatedBody;
 
     // The page always renders on the English translation; switching to the original is a purely
     // client-side toggle (see Post.cshtml / site.js). Any query string is ignored — there is no
@@ -48,7 +84,7 @@ public class PostModel : PageModel
         Post = post;
 
         var original = _sanitizer.Sanitize(post.ContentZhHtml);
-        OriginalHtml = string.IsNullOrWhiteSpace(original) ? "" : original;
+        OriginalHtml = HtmlText.IsBlank(original) ? "" : original;
 
         return Page();
     }

@@ -50,7 +50,9 @@ public class PostOriginalSanitizeTests
     [Fact]
     public void EmptyOriginalStaysEmpty()
     {
-        // Drives HasOriginal on the page: a post stored without a body offers no toggle at all.
+        // Drives HasOriginalBody on the page: a post stored without a body renders no original body.
+        // (The toggle itself survives that — the original TITLE still justifies it; see
+        // PostPageOriginalToggleTests.)
         Assert.True(string.IsNullOrWhiteSpace(_sanitizer.Sanitize("")));
         Assert.True(string.IsNullOrWhiteSpace(_sanitizer.Sanitize(null)));
     }
