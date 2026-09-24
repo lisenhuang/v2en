@@ -208,10 +208,10 @@
                 </select>
             </div>
             <div class="field">
-                <label asp-for="TranslationPrimaryModel">Primary model</label>
+                <label for="models-primary">Primary model</label>
+                <select id="models-primary" class="prov-model-pick" data-slot="primary"></select>
                 <input type="text" asp-for="TranslationPrimaryModel" class="prov-model" data-slot="primary"
-                       list="models-primary" autocomplete="off" placeholder="pick a provider first" />
-                <datalist id="models-primary"></datalist>
+                       autocomplete="off" placeholder="type a model id" style="margin-top:6px" />
             </div>
             <div class="field prov-reasoning-field" data-slot="primary">
                 <label asp-for="TranslationPrimaryReasoning">Primary reasoning</label>
@@ -229,10 +229,10 @@
                 </select>
             </div>
             <div class="field">
-                <label asp-for="TranslationFallbackModel">Fallback model</label>
+                <label for="models-fallback">Fallback model</label>
+                <select id="models-fallback" class="prov-model-pick" data-slot="fallback"></select>
                 <input type="text" asp-for="TranslationFallbackModel" class="prov-model" data-slot="fallback"
-                       list="models-fallback" autocomplete="off" placeholder="pick a provider first" />
-                <datalist id="models-fallback"></datalist>
+                       autocomplete="off" placeholder="type a model id" style="margin-top:6px" />
             </div>
             <div class="field prov-reasoning-field" data-slot="fallback">
                 <label asp-for="TranslationFallbackReasoning">Fallback reasoning</label>
@@ -521,13 +521,27 @@
             }
             function effortsFor(id) { var m = findCgpt(id); return m ? m.efforts : ALL_EFFORTS; }
 
-            function fillDatalist(slot, provider) {
-                var dl = document.getElementById('models-' + slot);
-                if (!dl) return;
-                dl.innerHTML = '';
-                var ids = provider === 'chatgpt' ? CGPT_MODELS.map(function (m) { return m.id; })
-                        : provider === 'openrouter' ? OR_MODELS : [];
-                ids.forEach(function (id) { var o = document.createElement('option'); o.value = id; dl.appendChild(o); });
+            var CUSTOM = '__custom';
+            // Dropdown of the provider's live models + "Other…" for a hand-typed id. The text input stays
+            // the real form field; it's only shown for "Other…" (or a saved id that isn't in the list).
+            function fillPicker(slot, provider, modelInput) {
+                var pick = document.getElementById('models-' + slot);
+                if (!pick) return;
+                pick.innerHTML = '';
+                var models = provider === 'chatgpt'
+                    ? CGPT_MODELS.map(function (m) { return { id: m.id, label: m.displayName && m.displayName !== m.id ? m.displayName + ' (' + m.id + ')' : m.id }; })
+                    : provider === 'openrouter' ? OR_MODELS.map(function (id) { return { id: id, label: id }; }) : [];
+                function add(value, label) { var o = document.createElement('option'); o.value = value; o.textContent = label; pick.appendChild(o); }
+                add('', provider ? '— pick a model —' : 'pick a provider first');
+                models.forEach(function (m) { add(m.id, m.label); });
+                if (provider) add(CUSTOM, 'Other (type a model id)…');
+                pick.disabled = !provider;
+
+                var v = modelInput.value.trim();
+                var listed = models.some(function (m) { return m.id.toLowerCase() === v.toLowerCase(); });
+                if (listed) pick.value = models.filter(function (m) { return m.id.toLowerCase() === v.toLowerCase(); })[0].id;
+                else pick.value = v && provider ? CUSTOM : '';
+                modelInput.style.display = pick.value === CUSTOM ? '' : 'none';
             }
             function fillReasoning(slot, provider, model, selected) {
                 var field = document.querySelector('.prov-reasoning-field[data-slot="' + slot + '"]');
@@ -549,10 +563,9 @@
                 var modelInput = document.querySelector('.prov-model[data-slot="' + slot + '"]');
                 if (!provSel || !modelInput) return;
                 var provider = provSel.value;
-                fillDatalist(slot, provider);
+                fillPicker(slot, provider, modelInput);
                 modelInput.disabled = !provider;
-                modelInput.placeholder = !provider ? 'pick a provider first'
-                    : provider === 'chatgpt' ? 'e.g. gpt-5.1-codex' : 'e.g. deepseek/deepseek-r1:free';
+                modelInput.placeholder = provider === 'openrouter' ? 'e.g. deepseek/deepseek-r1:free' : 'e.g. gpt-6-sol';
                 var current = reasoningValue !== undefined
                     ? reasoningValue
                     : (document.querySelector('.prov-reasoning[data-slot="' + slot + '"]') || {}).value;
@@ -563,10 +576,23 @@
                 var provSel = document.querySelector('.prov-select[data-slot="' + slot + '"]');
                 var modelInput = document.querySelector('.prov-model[data-slot="' + slot + '"]');
                 if (!provSel || !modelInput) return;
-                provSel.addEventListener('change', function () { syncSlot(slot, ''); });
+                var pick = document.getElementById('models-' + slot);
+                // A model id belongs to one provider, so switching provider starts the pick afresh.
+                provSel.addEventListener('change', function () { modelInput.value = ''; syncSlot(slot, ''); });
+                if (pick) pick.addEventListener('change', function () {
+                    if (pick.value === CUSTOM) {
+                        modelInput.style.display = '';
+                        modelInput.focus();
+                    } else {
+                        modelInput.value = pick.value;
+                        modelInput.style.display = 'none';
+                    }
+                    var sel = document.querySelector('.prov-reasoning[data-slot="' + slot + '"]');
+                    fillReasoning(slot, provSel.value, modelInput.value, sel ? sel.value : '');
+                });
                 modelInput.addEventListener('input', function () {
                     var sel = document.querySelector('.prov-reasoning[data-slot="' + slot + '"]');
-                    syncSlot(slot, sel ? sel.value : '');
+                    fillReasoning(slot, provSel.value, modelInput.value, sel ? sel.value : '');
                 });
                 var saved = slot === 'primary' ? ROUTING.primaryReasoning : ROUTING.fallbackReasoning;
                 syncSlot(slot, saved);

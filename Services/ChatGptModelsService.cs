@@ -32,23 +32,35 @@ public class ChatGptModelsService
 {
     /// <summary>
     /// Codex CLI version we advertise to the backend (in the <c>client_version</c> query param and the
-    /// <c>User-Agent</c>). The backend gates which models it returns — and can degrade requests from
-    /// clients it considers outdated — so this must look like a current CLI. Bump it as the real CLI
-    /// (npm <c>@openai/codex</c>) moves forward. Shared with <see cref="ChatGptTranslator"/>.
+    /// <c>User-Agent</c>). The backend hides every model whose <c>minimal_client_version</c> is above it
+    /// (GPT-6 needs >= 0.155), so it must look like a current CLI. It tracks the latest npm
+    /// <c>@openai/codex</c> release (see <see cref="RefreshClientVersionAsync"/>), never dropping below
+    /// <see cref="MinCodexCliVersion"/>. Shared with <see cref="ChatGptTranslator"/>.
     /// </summary>
-    public const string CodexCliVersion = "0.144.4";
+    public static string CodexCliVersion => _codexCliVersion;
+
+    /// <summary>Bundled floor for <see cref="CodexCliVersion"/>, used until (or if never) npm answers.</summary>
+    public const string MinCodexCliVersion = "0.156.1";
+
+    private static volatile string _codexCliVersion = MinCodexCliVersion;
+    private static DateTimeOffset _versionCheckedAt = DateTimeOffset.MinValue;
+    private static readonly TimeSpan VersionTtl = TimeSpan.FromHours(6);
+    private const string NpmLatestUrl = "https://registry.npmjs.org/@openai/codex/latest";
 
     private const string CacheKey = "chatgpt_codex_models";
     private static readonly TimeSpan CacheTtl = TimeSpan.FromMinutes(30);
 
     /// <summary>
     /// Offline fallback catalogue — mirrors the Codex CLI's bundled <c>models.json</c> (the current
-    /// GPT-5.6 line-up). Used only when no ChatGPT account is connected or the live fetch fails.
+    /// GPT-6 / GPT-5.6 line-up). Used only when no ChatGPT account is connected or the live fetch fails.
     /// Order = suggested preference (best general translation first). Keep it roughly current so the
     /// fallback isn't ancient, but the live fetch is the real source of truth.
     /// </summary>
     private static readonly IReadOnlyList<ChatGptModel> FallbackCatalog = new List<ChatGptModel>
     {
+        new("gpt-6-sol",     "GPT-6-Sol",     new[] { "low", "medium", "high", "xhigh", "max", "ultra" }, "medium"),
+        new("gpt-6-astra",   "GPT-6-Astra",   new[] { "low", "medium", "high", "xhigh", "max", "ultra" }, "low"),
+        new("gpt-6-luna",    "GPT-6-Luna",    new[] { "low", "medium", "high", "xhigh", "max" }, "medium"),
         new("gpt-5.6-sol",   "GPT-5.6-Sol",   new[] { "low", "medium", "high", "xhigh", "max", "ultra" }, "medium"),
         new("gpt-5.6-terra", "GPT-5.6-Terra", new[] { "low", "medium", "high", "xhigh", "max", "ultra" }, "medium"),
         new("gpt-5.6-luna",  "GPT-5.6-Luna",  new[] { "low", "medium", "high", "xhigh", "max" }, "medium"),
@@ -106,6 +118,7 @@ public class ChatGptModelsService
         var token = await _auth.GetValidAccessTokenAsync(ct);
         if (token is null) return Array.Empty<ChatGptModel>(); // no account connected → caller uses fallback
 
+        await RefreshClientVersionAsync(ct);
         try
         {
             using var req = new HttpRequestMessage(HttpMethod.Get, $"models?client_version={CodexCliVersion}");
@@ -134,6 +147,36 @@ public class ChatGptModelsService
         {
             _logger.LogWarning(ex, "Codex models fetch failed. Using fallback catalogue.");
             return Array.Empty<ChatGptModel>();
+        }
+    }
+
+    /// <summary>
+    /// Move <see cref="CodexCliVersion"/> up to the latest npm <c>@openai/codex</c> release (checked at most
+    /// every <see cref="VersionTtl"/>), so newly released models show up without a code change. Best-effort:
+    /// on any failure the current value stays.
+    /// </summary>
+    private async Task RefreshClientVersionAsync(CancellationToken ct)
+    {
+        if (DateTimeOffset.UtcNow - _versionCheckedAt < VersionTtl) return;
+        _versionCheckedAt = DateTimeOffset.UtcNow;
+        try
+        {
+            using var resp = await _http.GetAsync(NpmLatestUrl, ct);
+            if (!resp.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("Codex version lookup on npm failed: HTTP {Status}. Using {Version}.",
+                    (int)resp.StatusCode, CodexCliVersion);
+                return;
+            }
+            await using var stream = await resp.Content.ReadAsStreamAsync(ct);
+            using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: ct);
+            var latest = GetString(doc.RootElement, "version");
+            if (Version.TryParse(latest, out var l) && Version.TryParse(MinCodexCliVersion, out var min) && l > min)
+                _codexCliVersion = latest!;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Codex version lookup on npm failed. Using {Version}.", CodexCliVersion);
         }
     }
 
