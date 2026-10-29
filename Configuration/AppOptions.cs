@@ -4,6 +4,9 @@ public class FeedOptions
 {
     public const string Section = "Feed";
 
+    /// <summary>Disable only on temporary web replicas during a rolling deployment.</summary>
+    public bool Enabled { get; set; } = true;
+
     public string SourceUrl { get; set; } = "https://www.v2ex.com/index.xml";
 
     /// <summary>Poll interval. 300s matches the source's Cache-Control: max-age=300.</summary>

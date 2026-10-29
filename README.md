@@ -195,3 +195,5 @@ structured data and sitemap URLs agree. Keep the old DNS record proxied for redi
 These changes improve discovery and attribution, but do not guarantee search rankings or AI citations.
 `llms.txt` is supplementary guidance, not an access-control mechanism or a search-engine requirement.
 After deployment, submit `https://v2en.9l.nz/sitemap.xml` to your verified search-console properties.
+
+For rolling deployments, temporary web replicas can use `Feed__Enabled=false` to serve the shared database without running a second feed/translation worker. The default is `true`; keep it enabled on the main instance.

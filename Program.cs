@@ -87,7 +87,8 @@ builder.Services.AddScoped<RuntimeSettingsService>();
 builder.Services.AddScoped<TranslationService>();
 builder.Services.AddScoped<RetrievalService>();
 builder.Services.AddScoped<PostDetailsService>();
-builder.Services.AddHostedService<FeedWorker>();
+if (builder.Configuration.GetValue("Feed:Enabled", true))
+    builder.Services.AddHostedService<FeedWorker>();
 builder.Services.AddMemoryCache();
 
 // ── Web analytics: queue page views on the request path, write + report off it ────
