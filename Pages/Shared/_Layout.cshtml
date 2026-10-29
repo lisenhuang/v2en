@@ -1,13 +1,39 @@
+@inject Microsoft.Extensions.Options.IOptions<v2en.Configuration.SiteOptions> SiteOptions
 @{
-    var canonical = ViewData["Canonical"] as string;
+    var origin = SiteMetadata.Origin(SiteOptions.Value);
+    var canonical = ViewData["Canonical"] as string ?? origin + Context.Request.Path;
+    var description = ViewData["Description"] as string ?? SiteMetadata.Description;
+    var pageTitle = ViewData["Title"] is null ? "V2EN: V2EX in English" : ViewData["Title"] + " · V2EN";
+    var noindex = Context.Request.Path.StartsWithSegments("/search") || Context.Request.Path.StartsWithSegments("/Error");
 }
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, interactive-widget=resizes-content" />
-    <title>@(ViewData["Title"] is null ? "V2EX · English" : ViewData["Title"] + " · V2EX English")</title>
-    <meta name="description" content="@(ViewData["Description"] ?? "V2EX front-page posts, translated to English.")" />
+    <title>@pageTitle</title>
+    <meta name="description" content="@description" />
+    <meta name="robots" content="@(noindex ? "noindex, follow" : "index, follow, max-snippet:-1, max-image-preview:large")" />
+    <meta property="og:site_name" content="V2EN" />
+    <meta property="og:type" content="@(ViewData["ArticleJson"] is null ? "website" : "article")" />
+    <meta property="og:title" content="@pageTitle" />
+    <meta property="og:description" content="@description" />
+    <meta property="og:url" content="@canonical" />
+    <meta property="og:locale" content="en_US" />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="@pageTitle" />
+    <meta name="twitter:description" content="@description" />
+    @if (ViewData["ArticleJson"] is string articleJson)
+    {
+        <script type="application/ld+json">@Html.Raw(articleJson)</script>
+    }
+    else if (Context.Request.Path == "/")
+    {
+        <script type="application/ld+json">@Html.Raw(System.Text.Json.JsonSerializer.Serialize(new Dictionary<string, object> {
+            ["@context"] = "https://schema.org", ["@type"] = "WebSite", ["name"] = "V2EN",
+            ["url"] = origin + "/", ["description"] = SiteMetadata.Description, ["inLanguage"] = "en"
+        }))</script>
+    }
     @if (!string.IsNullOrEmpty(canonical))
     {
         <link rel="canonical" href="@canonical" />
@@ -69,11 +95,13 @@
                 Translated mirror of <a href="https://www.v2ex.com/" rel="nofollow noopener" target="_blank">V2EX</a>,
                 not affiliated with V2EX. Content © V2EX and respective authors; machine-translated to English.
             </p>
+            <p><a href="/about">About V2EN and translation accuracy</a> · <a href="/llms.txt">AI reader guide</a></p>
             <p class="site-version" title="Build time (UTC)">v@(v2en.AppVersion.Stamp)</p>
         </div>
     </footer>
 
     <script src="~/js/site.js" asp-append-version="true"></script>
+    <script src="~/js/webmcp.js" asp-append-version="true" defer></script>
     @await RenderSectionAsync("Scripts", required: false)
 </body>
 </html>

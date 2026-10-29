@@ -1,10 +1,13 @@
 @page "/t/{id:long}"
 @model PostModel
+@inject Microsoft.Extensions.Options.IOptions<v2en.Configuration.SiteOptions> SiteOptions
 @{
     var titleEn = Model.TitleEnDisplay;
     ViewData["Title"] = titleEn;
-    ViewData["Description"] = HtmlText.Preview(Model.Post.ContentEnHtml, 160);
-    ViewData["Canonical"] = Model.Post.SourceUrl;
+    ViewData["Description"] = HtmlText.IsBlank(Model.Post.ContentEnHtml) ? titleEn + " — an English translation of a V2EX discussion." : HtmlText.Preview(Model.Post.ContentEnHtml, 160);
+    var origin = SiteMetadata.Origin(SiteOptions.Value);
+    ViewData["Canonical"] = SiteMetadata.PostUrl(origin, Model.Post.V2exId);
+    ViewData["ArticleJson"] = SiteMetadata.ArticleJson(Model.Post, origin);
 
     const string labelToOriginal = "View original (中文)";
     const string labelToEnglish = "Show English translation";
@@ -69,6 +72,12 @@
         </div>
     }
 
+    <p class="post-meta">Machine-translated from V2EX. Community content may contain errors or opinions; verify details against the original source.
+        @if (Model.Post.TranslatedAt is { } translated)
+        {
+            <span>Translated <time datetime="@translated.ToString("O")">@translated.UtcDateTime.ToString("yyyy-MM-dd HH:mm")Z</time>.</span>
+        }
+    </p>
     <div class="post-footer">
         <a class="source-link" href="@Model.Post.SourceUrl" rel="nofollow noopener" target="_blank">View original on V2EX →</a>
     </div>

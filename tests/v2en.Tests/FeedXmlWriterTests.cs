@@ -28,7 +28,7 @@ public class FeedXmlWriterTests
         };
 
         var xml = FeedXmlWriter.Build(
-            "https://v2en.aify.nz/",
+            "https://v2en.9l.nz/",
             new SiteOptions(),
             new[] { post },
             DateTimeOffset.Parse("2026-08-10T00:00:00Z"));
@@ -38,6 +38,6 @@ public class FeedXmlWriterTests
         var link = entry.Elements(Atom + "link")
             .Single(element => (string?)element.Attribute("rel") == "alternate");
 
-        Assert.Equal("https://v2en.aify.nz/t/123456", (string?)link.Attribute("href"));
+        Assert.Equal("https://v2en.9l.nz/t/123456", (string?)link.Attribute("href"));
     }
 }

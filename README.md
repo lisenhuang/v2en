@@ -106,7 +106,7 @@ Keys live in SQLite (`/data/v2en.db`). They can also be **seeded** from env on f
 
 ```bash
 export OPENROUTER_API_KEY=sk-or-...          # optional seed (or set later in /admin)
-export SITE_BASE_URL=https://your-domain.example
+export SITE_BASE_URL=https://v2en.9l.nz
 docker compose up -d --build
 ```
 
@@ -175,3 +175,23 @@ dashboard loads no third-party scripts.
 ## ⚠️ Disclaimer
 
 Unofficial translated mirror. Content belongs to [V2EX](https://www.v2ex.com) and its authors. Translations & answers are AI-generated and may be inaccurate. Not affiliated with V2EX.
+
+## Search and AI discovery
+
+The public site is https://v2en.9l.nz. Cloudflare redirects the previous
+`v2en.aify.nz` hostname with HTTP 301, preserving paths and query strings.
+Set `Site__BaseUrl=https://v2en.9l.nz` in production so feed links, canonical URLs,
+structured data and sitemap URLs agree. Keep the old DNS record proxied for redirects.
+
+- `/sitemap.xml` indexes static pages and batches of 1,000 translated posts.
+- English posts have self-canonical URLs, Article JSON-LD, source attribution and translation dates.
+- `/about` explains provenance and accuracy; `/llms.txt` describes citation and discovery.
+- `/api/public/posts?q=keyword&limit=10&before=123` and `/api/public/posts/{id}` expose only public translations.
+  Search is literal keyword matching. Pagination uses descending post IDs. Requests are limited to 60/minute per client IP.
+- `webmcp.js` registers three read-only tools with `document.modelContext` (or the early preview navigator API).
+  Unsupported browsers continue normally. No provider keys or admin actions are exposed.
+- Admin, API, health and internal-search pages are excluded from indexing; public posts remain crawlable.
+
+These changes improve discovery and attribution, but do not guarantee search rankings or AI citations.
+`llms.txt` is supplementary guidance, not an access-control mechanism or a search-engine requirement.
+After deployment, submit `https://v2en.9l.nz/sitemap.xml` to your verified search-console properties.

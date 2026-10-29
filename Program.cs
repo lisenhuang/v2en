@@ -1,3 +1,5 @@
+using System.Threading.RateLimiting;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
@@ -136,6 +138,13 @@ builder.Services.AddAuthorization();
 builder.Services.AddAntiforgery(o => o.HeaderName = "RequestVerificationToken");
 
 // ── Infrastructure ────────────────────────────────────────────────────────────────
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.AddPolicy("discovery", context => RateLimitPartition.GetFixedWindowLimiter(
+        context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+        _ => new FixedWindowRateLimiterOptions { PermitLimit = 60, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
+});
 builder.Services.AddHealthChecks();
 builder.Services.AddRazorPages(options =>
 {
@@ -162,6 +171,14 @@ if (!app.Environment.IsDevelopment())
 
 app.UseStaticFiles();
 app.UseRouting();
+app.UseRateLimiter();
+app.Use(async (context, next) =>
+{
+    if (context.Request.Path.StartsWithSegments("/admin") || context.Request.Path.StartsWithSegments("/api") ||
+        context.Request.Path.StartsWithSegments("/search") || context.Request.Path.StartsWithSegments("/healthz"))
+        context.Response.Headers["X-Robots-Tag"] = "noindex, nofollow";
+    await next();
+});
 app.UseAuthentication();
 app.UseAuthorization();
 
@@ -280,6 +297,7 @@ using (var scope = app.Services.CreateScope())
 app.MapHealthChecks("/healthz");
 app.MapStaticAssets();
 app.MapRazorPages();
+app.MapDiscovery();
 
 // English Atom 1.0 feed — same structure as https://www.v2ex.com/index.xml
 // Entry <link> points to v2en mirror URLs; feed self/alternate points to our domain.

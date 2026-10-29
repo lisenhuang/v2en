@@ -1,5 +1,0 @@
-User-agent: *
-Allow: /
-Disallow: /healthz
-
-Sitemap: /index.xml

@@ -1,13 +1,21 @@
 @page
 @model IndexModel
+@inject Microsoft.Extensions.Options.IOptions<v2en.Configuration.SiteOptions> SiteOptions
 @{
-    ViewData["Title"] = null; // home
+    ViewData["Title"] = Model.CurrentPage == 1 ? null : $"V2EX in English, page {Model.CurrentPage}";
+    ViewData["Canonical"] = SiteMetadata.Origin(SiteOptions.Value) + (Model.CurrentPage == 1 ? "/" : $"/?p={Model.CurrentPage}");
 }
+
+<section class="site-intro">
+    <h1>V2EX in English</h1>
+    <p>Explore technology and developer discussions from V2EX, machine-translated into English with links to the original posts.</p>
+    <p><a href="/search">Search posts</a> · <a href="/ask">Ask the feed</a> · <a href="/about">How V2EN works</a></p>
+</section>
 
 @if (Model.TranslatedCount == 0)
 {
     <section class="empty-state">
-        <h1>Translations in progress…</h1>
+        <h2>Translations in progress…</h2>
         <p>
             We're fetching the V2EX front page and translating posts to English.
             @if (Model.PendingCount > 0)
